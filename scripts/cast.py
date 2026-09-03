@@ -22,7 +22,8 @@ Events out:
     {"event": "unavailable", "reason": "..."}
     {"event": "devices",     "devices": [{"uuid","name","model","host","port"}]}
     {"event": "connected",   "uuid": "...", "name": "...", "volume": 0-100}
-    {"event": "status",      "state": "...", "volume": 0-100, "connected": bool}
+    {"event": "status",      "state": "...", "volume": 0-100, "connected": bool,
+                             "content": "..."}
     {"event": "error",       "message": "..."}
 """
 
@@ -172,6 +173,17 @@ class Bridge(CastStatusListener, MediaStatusListener):
             volume=volume_to_percent(cast.status.volume_level if cast.status else 0),
         )
 
+        # Report what the device is doing right now rather than waiting for it
+        # to change. A session we started before this process existed — the
+        # shell restarted, the plugin reloaded — is still ours to adopt, and
+        # the content id is how the caller tells it apart from someone else's
+        # music.
+        try:
+            cast.media_controller.update_status()
+        except Exception:
+            pass
+        self._emit_status()
+
     def disconnect(self):
         cast, self.cast = self.cast, None
         if cast is None:
@@ -238,23 +250,26 @@ class Bridge(CastStatusListener, MediaStatusListener):
 
     # ------------------------------------------------- pychromecast callbacks
 
-    def new_cast_status(self, status):
+    def _emit_status(self, state=None, volume_level=None):
+        cast = self.cast
+        content = ""
+        if cast is not None:
+            content = clean(getattr(cast.media_controller.status, "content_id", ""), 400)
+        if volume_level is None:
+            volume_level = cast.status.volume_level if cast and cast.status else 0
         emit(
             event="status",
-            state=self._player_state(),
-            volume=volume_to_percent(getattr(status, "volume_level", 0)),
-            connected=self.cast is not None,
+            state=clean(state if state is not None else self._player_state(), 20),
+            volume=volume_to_percent(volume_level),
+            connected=cast is not None,
+            content=content,
         )
 
+    def new_cast_status(self, status):
+        self._emit_status(volume_level=getattr(status, "volume_level", 0))
+
     def new_media_status(self, status):
-        emit(
-            event="status",
-            state=clean(getattr(status, "player_state", "UNKNOWN"), 20),
-            volume=volume_to_percent(
-                self.cast.status.volume_level if self.cast and self.cast.status else 0
-            ),
-            connected=self.cast is not None,
-        )
+        self._emit_status(state=getattr(status, "player_state", "UNKNOWN"))
 
     def load_media_failed(self, item, error_code):
         emit(event="error", message="device rejected the stream (code {})".format(error_code))

@@ -64,6 +64,9 @@ Item {
   // speaker, so a session that has once reached PLAYING stays playing until
   // it actually stops.
   property bool everPlayed: false
+  // What the device says it is playing, used to tell our own stream from
+  // someone else's music when adopting an existing session.
+  property string deviceContent: ""
   readonly property bool sessionLive: deviceState === "PLAYING"
     || (everPlayed && deviceState === "BUFFERING")
   readonly property bool playing: wanted && connected && sessionLive
@@ -160,6 +163,20 @@ Item {
     send({ cmd: "volume", level: Model.clampVolume(volume) })
   }
 
+  // Reconnect to a remembered device purely to find out what it is doing.
+  // A cast survives this shell — that is the point of it — so after a restart
+  // or a plugin reload the radio may well still be playing, and the right
+  // thing is to pick the session back up rather than leave it orphaned with
+  // no way to stop it.
+  function adoptExistingSession() {
+    if (targetUuid === "") return
+    adopting = true
+    adoptTimeout.restart()
+    discover()
+  }
+
+  property bool adopting: false
+
   // Switching channel while casting reloads the stream on the device, which
   // is the only way to change what it is fetching.
   function switchStream(url) {
@@ -170,7 +187,7 @@ Item {
   // ------------------------------------------------------------- lifecycle
 
   // Every reason the helper might need to be running, in one place.
-  readonly property bool shouldRun: bridgeEnabled || wanted || discoveryRequested
+  readonly property bool shouldRun: bridgeEnabled || wanted || discoveryRequested || adopting
 
   onShouldRunChanged: {
     if (shouldRun) {
@@ -235,7 +252,8 @@ Item {
       // Only reconnect to a remembered device when audio is actually headed
       // there. Opening the panel should list what is on the network, not open
       // a session with someone's speaker.
-      if (wanted && targetUuid !== "" && !connected && Model.hasDevice(devices, targetUuid))
+      if ((wanted || adopting) && targetUuid !== "" && !connected
+        && Model.hasDevice(devices, targetUuid))
         send({ cmd: "connect", uuid: targetUuid })
       else if (wanted && targetUuid === "" && devices.length === 1)
         // Exactly one device on the network and no remembered choice: using
@@ -260,8 +278,31 @@ Item {
       connected = message.connected === true
       // UNKNOWN shows up between connecting and the first media session; it
       // is not a playback state and would flap the UI if treated as one.
-      var state = Model.plainText(message.state, 20)
-      if (state !== "" && state !== "UNKNOWN") deviceState = state
+      var reported = Model.plainText(message.state, 20)
+      if (reported !== "" && reported !== "UNKNOWN") deviceState = reported
+      deviceContent = Model.plainText(message.content, 400)
+
+      // Adoption: the device may already be playing one of our streams,
+      // started by a shell that is no longer around. Take ownership so the
+      // panel shows it playing and can stop it.
+      //
+      // Only what the device actually reported counts here. A freshly
+      // connected session answers UNKNOWN for a moment before the real state
+      // arrives, and treating that as "not playing" would abandon a live
+      // session a second before it identified itself.
+      if (adopting) {
+        if (reported === "PLAYING") {
+          adopting = false
+          adoptTimeout.stop()
+          if (Model.isOwnStream(deviceContent)) {
+            wanted = true
+            everPlayed = true
+          }
+        } else if (reported === "IDLE" || reported === "PAUSED") {
+          adopting = false
+          adoptTimeout.stop()
+        }
+      }
       if (deviceState === "PLAYING") {
         everPlayed = true
         // Audio is coming out of the speaker; whatever went wrong on the way
@@ -310,6 +351,8 @@ Item {
       root.discovering = false
       root.discoveryRequested = false
       root.everPlayed = false
+      root.adopting = false
+      root.deviceContent = ""
       root.deviceState = "IDLE"
       // The device list is kept: it is the last thing we actually saw on the
       // network, and dropping it would empty the panel's output section every
@@ -334,6 +377,13 @@ Item {
       if (root.devices.length === 0 && root.lastError === "")
         root.lastError = "No cast devices found on this network"
     }
+  }
+
+  // A device that never says what it is doing should not hold the bridge up.
+  Timer {
+    id: adoptTimeout
+    interval: 12000
+    onTriggered: root.adopting = false
   }
 
   // Give the helper a moment to close its device connection cleanly before

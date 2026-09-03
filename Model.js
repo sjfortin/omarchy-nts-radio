@@ -286,6 +286,17 @@ function castDevices(raw) {
   return out
 }
 
+// Is this URL one of ours? Used to decide whether a cast session already
+// running on a device belongs to this plugin and can be adopted, rather than
+// hijacking whatever else someone is listening to.
+function isOwnStream(url) {
+  var value = String(url || "")
+  for (var i = 0; i < CHANNELS.length; i++) {
+    if (value === STREAM_ENDPOINTS[CHANNELS[i]]) return true
+  }
+  return false
+}
+
 function hasDevice(devices, uuid) {
   if (!devices || !devices.length) return false
   for (var i = 0; i < devices.length; i++) {
@@ -358,6 +369,7 @@ if (typeof module !== "undefined") {
     mprisTitle: mprisTitle,
     nextRefreshDelay: nextRefreshDelay,
     castDevices: castDevices,
+    isOwnStream: isOwnStream,
     hasDevice: hasDevice,
     deviceName: deviceName,
     outputModeFromSetting: outputModeFromSetting,

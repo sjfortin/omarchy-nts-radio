@@ -112,6 +112,13 @@ every time a show changes is worse than a stale title.
 Your chosen device is remembered between sessions and reconnected
 automatically when it is back on the network.
 
+Because the device is doing the playing, a cast survives this shell. If
+Omarchy restarts — a crash, `omarchy restart shell`, a plugin reload — while
+you are casting, the radio keeps going, and the plugin reconnects and picks
+the session back up so the panel shows it playing and can stop it. It only
+adopts a session that is playing an NTS stream it recognizes, so it will never
+take over someone else's music on the same speaker.
+
 **Media keys**
 
 While something is playing, mpv registers as

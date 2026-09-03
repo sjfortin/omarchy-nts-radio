@@ -70,6 +70,11 @@ Item {
 
     settingsAdopted = true
     applySettings(values)
+
+    // Only now is it known which device the last session used. A cast
+    // outlives this process, so before deciding we are stopped, ask the
+    // device whether it is still playing one of our streams.
+    if (casting && castUuid !== "") caster.adoptExistingSession()
   }
 
   // Live edits from the bar's own settings form land here too, so changing
