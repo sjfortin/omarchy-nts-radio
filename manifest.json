@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "sjfortin.nts-radio",
+  "name": "NTS Radio",
+  "version": "1.0.0",
+  "author": "Sam Fortin",
+  "license": "MIT",
+  "description": "NTS Radio 1 and 2 in the Omarchy bar: live show metadata, one-click channel switching, and local playback through mpv.",
+  "homepage": "https://github.com/sjfortin/omarchy-nts-radio",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "NTS Radio",
+    "description": "Live NTS 1 / NTS 2 with now-playing and playback controls",
+    "category": "Media",
+    "aliases": [
+      "nts",
+      "radio",
+      "music"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "channel": "NTS 1",
+      "showTitleInBar": "When playing",
+      "maxBarTextWidth": 160,
+      "volume": 70,
+      "refreshMinutes": 1
+    },
+    "schema": [
+      {
+        "key": "channel",
+        "type": "enum",
+        "label": "Channel",
+        "options": [
+          "NTS 1",
+          "NTS 2"
+        ],
+        "defaultValue": "NTS 1",
+        "description": "The channel the widget starts on. Switching channels in the panel updates this."
+      },
+      {
+        "key": "showTitleInBar",
+        "type": "enum",
+        "label": "Show title in bar",
+        "options": [
+          "When playing",
+          "Always",
+          "Never"
+        ],
+        "defaultValue": "When playing",
+        "description": "Whether the current broadcast title is appended to the NTS mark in the bar."
+      },
+      {
+        "key": "maxBarTextWidth",
+        "type": "integer",
+        "label": "Maximum bar text width",
+        "min": 0,
+        "max": 480,
+        "step": 20,
+        "defaultValue": 160,
+        "description": "Width in pixels for the broadcast title in the bar. Use 0 to hide the title entirely."
+      },
+      {
+        "key": "volume",
+        "type": "integer",
+        "label": "Playback volume",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 70,
+        "description": "Volume of the NTS stream itself, independent of the system volume."
+      },
+      {
+        "key": "refreshMinutes",
+        "type": "integer",
+        "label": "Metadata refresh",
+        "min": 1,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 1,
+        "description": "Minutes between now-playing refreshes while the panel is open or a stream is playing. Idle refreshes are much rarer."
+      }
+    ]
+  }
+}
