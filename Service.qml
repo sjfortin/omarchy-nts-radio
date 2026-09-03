@@ -294,7 +294,12 @@ Item {
   function setOutput(mode, uuid, name) {
     var wantedMode = Model.outputModeFromSetting(mode)
     var wantedUuid = wantedMode === "cast" ? Model.plainText(uuid, 80) : ""
-    if (wantedMode === outputMode && wantedUuid === castUuid) return
+    // Switching to local keeps the remembered device, so comparing uuids
+    // here would make every "output local" look like a change and needlessly
+    // restart playback. Only the device matters, and only while casting.
+    var alreadyThere = wantedMode === outputMode
+      && (wantedMode !== "cast" || wantedUuid === "" || wantedUuid === castUuid)
+    if (alreadyThere) return
 
     var wasPlaying = playing || loading
 
