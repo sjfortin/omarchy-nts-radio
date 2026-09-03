@@ -43,12 +43,34 @@ Item {
   // problems because the user asked for audio; a stale schedule is cosmetic.
   readonly property string problem: {
     if (!service) return ""
+    // A missing backend outranks everything: it explains the failure the user
+    // is about to hit, and it is the only problem here with a fix.
+    if (!casting && !service.mpvAvailable) return "mpv is not installed — sudo pacman -S mpv"
     if (service.playbackError !== "" && !playing) return service.playbackError
     if (service.metadataFailed) return service.live ? "Schedule may be out of date" : "Cannot reach NTS"
     return ""
   }
 
+  // Shown under the output list, not as an error: casting being unavailable
+  // is a missing optional dependency, not something going wrong.
+  readonly property string castNote: {
+    if (!service || service.castAvailable) return ""
+    if (service.castUnavailableReason !== "") return "Casting needs python-pychromecast"
+    return ""
+  }
+
+  readonly property bool casting: service ? service.casting : false
+  readonly property var castDevices: service ? service.castDevices : []
+  readonly property string castTarget: service ? service.castTargetName : ""
+
   implicitHeight: layout.implicitHeight
+
+  // Discovery is cheap and only runs while the panel is open, so the device
+  // list is current by the time anyone looks at the output row.
+  // Unconditional: whether casting is available is exactly what discovery
+  // answers, so gating on it would mean never finding out. The helper reports
+  // back in well under a second when the backend is missing.
+  onActiveChanged: if (active && service) service.discoverCastDevices()
 
   function clock(ms) {
     return ms > 0 ? Qt.formatDateTime(new Date(ms), "HH:mm") : "--:--"
@@ -114,6 +136,78 @@ Item {
       enabled: blockButton.enabledAction
       cursorShape: Qt.PointingHandCursor
       onClicked: blockButton.activated()
+    }
+  }
+
+  // One selectable audio destination. Deliberately a rule-separated row
+  // rather than a card: the output list is a subordinate choice, not a
+  // second control surface competing with the transport.
+  component OutputRow: Item {
+    id: outputRow
+
+    property string label: ""
+    property string detail: ""
+    property bool selected: false
+    property bool connecting: false
+    property bool enabledAction: true
+    signal activated()
+
+    implicitHeight: Math.max(Style.space(22), rowLabel.implicitHeight + Style.space(8))
+    height: visible ? implicitHeight : 0
+    opacity: enabledAction ? 1.0 : 0.45
+
+    // The selection marker is a filled square, the same language the bar
+    // widget uses for "audio is coming out of here".
+    Rectangle {
+      id: marker
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(7)
+      height: width
+      radius: 0
+      color: outputRow.selected && !outputRow.connecting ? root.ink : "transparent"
+      border.width: 1
+      border.color: Util.alpha(root.ink, outputRow.selected ? 0.9 : 0.4)
+    }
+
+    Text {
+      id: rowLabel
+      anchors.left: marker.right
+      anchors.leftMargin: Style.space(9)
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: outputRow.label
+      color: Util.alpha(root.ink, outputRow.selected ? 1.0 : 0.75)
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.bold: outputRow.selected
+      elide: Text.ElideRight
+      width: Math.max(0, outputRow.width - marker.width - rowDetail.implicitWidth - Style.space(24))
+    }
+
+    Caption {
+      id: rowDetail
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      text: outputRow.connecting ? "Connecting" : outputRow.detail
+      dim: 0.42
+    }
+
+    HoverHandler { id: rowHover }
+
+    Rectangle {
+      anchors.fill: parent
+      anchors.leftMargin: -Style.space(4)
+      anchors.rightMargin: -Style.space(4)
+      z: -1
+      color: rowHover.hovered && outputRow.enabledAction ? Util.alpha(root.ink, 0.07) : "transparent"
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      enabled: outputRow.enabledAction && !outputRow.selected
+      cursorShape: Qt.PointingHandCursor
+      onClicked: outputRow.activated()
     }
   }
 
@@ -417,7 +511,7 @@ Item {
         // "Retrying" rather than a "Connecting" that never resolves: the
         // player backs off and keeps trying, and this button is also how the
         // user calls it off.
-        label: root.playing ? "Pause"
+        label: root.playing ? (root.casting ? "Stop" : "Pause")
           : (root.loading ? (root.service && root.service.playbackError !== "" ? "Retrying" : "Connecting")
           : "Play")
         filled: root.playing
@@ -462,6 +556,91 @@ Item {
         label: "Open"
         enabledAction: root.hasShow
         onActivated: if (root.service) root.service.openCurrentShow()
+      }
+    }
+
+    // ---- output: this machine, or a device that fetches the stream itself
+
+    Rule {
+      visible: outputSection.visible
+    }
+
+    Column {
+      id: outputSection
+      width: parent.width
+      spacing: Style.space(5)
+      // Hidden entirely when there is nothing to choose between: no cast
+      // backend installed and no devices means no decision to present.
+      visible: root.service && (root.service.castAvailable || root.casting || root.castNote !== "")
+
+      Item {
+        width: parent.width
+        height: outputHeader.implicitHeight
+
+        Caption {
+          id: outputHeader
+          anchors.left: parent.left
+          text: "Output"
+          dim: 0.45
+          font.bold: true
+        }
+
+        Caption {
+          anchors.right: parent.right
+          text: root.service && root.service.castDiscovering ? "Looking…" : ""
+          dim: 0.4
+        }
+      }
+
+      // "This computer" is always first and always available; devices follow
+      // in discovery order.
+      Column {
+        width: parent.width
+        spacing: Style.space(4)
+
+        OutputRow {
+          width: parent.width
+          label: "This computer"
+          detail: root.service && !root.service.mpvAvailable ? "mpv not installed" : ""
+          selected: !root.casting
+          enabledAction: root.service !== null && root.service.mpvAvailable
+          onActivated: if (root.service) root.service.castToLocal()
+        }
+
+        Repeater {
+          model: root.castDevices
+
+          OutputRow {
+            required property var modelData
+
+            width: outputSection.width
+            label: modelData.name
+            detail: modelData.model
+            selected: root.casting && root.service && root.service.castUuid === modelData.uuid
+            connecting: selected && root.service && !root.service.castConnected
+            onActivated: if (root.service) root.service.castTo(modelData.uuid, modelData.name)
+          }
+        }
+
+        Caption {
+          width: parent.width
+          visible: root.castNote !== ""
+          text: root.castNote
+          dim: 0.4
+          topPadding: Style.space(3)
+        }
+
+        // A remembered device that is not answering right now still deserves
+        // a row, so the panel explains the state rather than losing it.
+        OutputRow {
+          width: parent.width
+          visible: root.casting && root.castTarget !== ""
+            && !Model.hasDevice(root.castDevices, root.service ? root.service.castUuid : "")
+          label: root.castTarget
+          detail: "Not on this network"
+          selected: true
+          enabledAction: false
+        }
       }
     }
 

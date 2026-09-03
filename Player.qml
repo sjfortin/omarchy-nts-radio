@@ -198,6 +198,11 @@ Item {
   // a narrow panel. Keep the shape of the message, lose the URL.
   function friendlyError(text) {
     var message = String(text || "")
+    // Decoder complaints about individual frames are routine on an icecast
+    // stream — a corrupt frame at the join, a glitch mid-broadcast — and mpv
+    // recovers from them. They are not something to put in front of a user.
+    // If the stream really is broken, the process exit says so.
+    if (/^\[(ffmpeg|lavf|ad|vd)/.test(message)) return ""
     if (/^Failed to open /.test(message)) return "Stream unavailable"
     if (/Failed to recognize file format/.test(message)) return "Stream unavailable"
     if (/^Could not open/.test(message)) return "Stream unavailable"
@@ -358,15 +363,17 @@ Item {
         root.restarting = false
         return
       }
-      if (root.wanted && exitCode !== 0) {
-        // Died while we still wanted audio: the stream dropped or the
-        // network went away. Reconnect on a backoff, the way a radio would,
-        // and leave the last error on screen while it tries.
-        if (root.lastError === "") root.lastError = "Stream unavailable"
-        if (!retryAfterFailure.running) retryAfterFailure.restart()
-      } else if (!root.paused) {
-        root.wanted = false
-      }
+      if (root.paused) return
+      if (!root.wanted) return
+
+      // Still wanted audio and mpv is gone. A live stream has no legitimate
+      // end, so a clean exit here means the relay dropped the connection —
+      // exactly the case a radio should reconnect from, not treat as "the
+      // track finished". Reconnect on a backoff and keep the reason visible
+      // while it tries.
+      if (root.lastError === "")
+        root.lastError = exitCode === 0 ? "Stream interrupted" : "Stream unavailable"
+      if (!retryAfterFailure.running) retryAfterFailure.restart()
     }
   }
 

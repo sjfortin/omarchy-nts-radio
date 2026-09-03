@@ -17,15 +17,22 @@ any other player.
 
 | Dependency | Required | What it does |
 |------------|----------|--------------|
-| `mpv` | yes | plays the stream |
+| `mpv` | for local playback | plays the stream on this machine |
 | `curl` | yes | fetches the schedule (already present on Omarchy) |
 | `mpv-mpris` | optional | media-key and MPRIS control |
+| `python-pychromecast` | optional | casting to Chromecast / Google Home / Nest devices |
 
 On Arch / Omarchy:
 
 ```bash
-sudo pacman -S --needed mpv mpv-mpris
+sudo pacman -S --needed mpv mpv-mpris python-pychromecast
 ```
+
+Every one of those is in the official repos; nothing here needs the AUR. Each
+optional piece degrades quietly on its own: without `mpv-mpris` you lose media
+keys, without `python-pychromecast` the panel simply does not offer casting,
+and without `mpv` the panel says so and points at the install command instead
+of failing with a stream error.
 
 Without `mpv-mpris` everything still works; you just lose media-key control.
 The plugin looks for the script at `/etc/mpv/scripts/mpris.so`,
@@ -77,6 +84,34 @@ current episode on nts.live in your browser.
 Playback is not tied to the panel. Closing the panel, moving the widget, or
 opening a different bar panel all leave the stream running.
 
+**Casting**
+
+The `OUTPUT` section of the panel lists *This computer* plus any
+Chromecast-protocol device on your network — Chromecast, Chromecast Audio,
+Google Home, Nest speakers and displays. Pick one and the audio moves; pick
+*This computer* and it comes back. If something was playing, it keeps playing
+across the move.
+
+Casting is not "route this laptop's audio elsewhere". The device fetches the
+NTS stream itself, so nothing is decoded or re-encoded here and **your laptop
+can sleep without interrupting the radio**. The plugin keeps a control
+connection only to start, stop, set volume, and report status.
+
+Two consequences worth knowing:
+
+- The volume slider controls whichever output is active — the device's own
+  volume when casting, mpv's when local. They are separate levels.
+- Media keys and MPRIS apply to local playback only. A cast session is running
+  on the device, not on this machine, so there is no local player for them to
+  talk to.
+
+The device shows the programme that was on air when casting started. Refreshing
+that would mean reloading the stream on the device, and a gap in the audio
+every time a show changes is worse than a stale title.
+
+Your chosen device is remembered between sessions and reconnected
+automatically when it is back on the network.
+
 **Media keys**
 
 While something is playing, mpv registers as
@@ -94,7 +129,11 @@ omarchy-shell nts-radio pause
 omarchy-shell nts-radio next         # other channel
 omarchy-shell nts-radio channel 2
 omarchy-shell nts-radio volume 60
-omarchy-shell nts-radio status       # JSON: channel, playback, show, up next
+omarchy-shell nts-radio status       # JSON: channel, playback, output, show, up next
+omarchy-shell nts-radio devices      # discover cast devices, as JSON
+omarchy-shell nts-radio output local            # play here
+omarchy-shell nts-radio output cast             # play on the remembered device
+omarchy-shell nts-radio output <device-uuid>    # play on a specific device
 ```
 
 Bind them in `~/.config/hypr/bindings.conf`:
@@ -118,6 +157,9 @@ Under **Setup → Plugins → NTS Radio**, or as keys on the widget's entry in
 | `maxBarTextWidth` | `160` | Pixel cap on that title. `0` hides it. |
 | `volume` | `70` | Stream volume, remembered between sessions. |
 | `refreshMinutes` | `1` | Minutes between schedule refreshes while the panel is open or audio is playing. |
+| `output` | `local` | `local` or `cast`. Set by picking an output in the panel. |
+| `castDevice` | — | UUID of the remembered cast device. |
+| `castDeviceName` | — | Its friendly name, so the panel can name it before discovery finishes. |
 
 Editing these takes effect immediately — no restart.
 
@@ -138,8 +180,10 @@ and length-capped before it reaches the UI, and artwork is only loaded from
 NTS's own media hosts.
 
 **Resources.** mpv exists only while playing, and is stopped five minutes after
-you pause. Disabling or removing the plugin stops it immediately and removes its
-IPC socket. The panel's clock only ticks while a panel is actually on screen.
+you pause. The cast bridge is a Python process that runs only while the panel is
+open or a cast is in progress. Disabling or removing the plugin stops both
+immediately and removes mpv's IPC socket. The panel's clock only ticks while a
+panel is actually on screen.
 
 ## Removal
 
@@ -168,6 +212,12 @@ installed and can reach the stream:
 mpv --no-video https://stream-relay-geo.ntslive.net/stream
 ```
 
+**No devices appear under Output.** Confirm the backend is present with
+`omarchy-shell nts-radio status` — `"castAvailable": true` means the bridge
+loaded. Then `omarchy-shell nts-radio devices` runs a discovery and prints what
+it found. Devices must be on the same network segment as this machine; mDNS
+does not cross most VLANs or guest networks.
+
 **Media keys do nothing.** Install `mpv-mpris` and confirm
 `omarchy-shell nts-radio status` reports `"mpris": true`. Media keys only reach
 this plugin while it is actually playing; when it is stopped there is no player
@@ -191,7 +241,9 @@ echo '{"command":["get_property","core-idle"]}' \
 manifest.json    plugin manifest (bar-widget + service)
 Service.qml      shared state: schedule polling, channel, playback, IPC
 Player.qml       the mpv child process and its JSON IPC socket
+Caster.qml       playback on a Chromecast device, and device discovery
 Model.js         every NTS endpoint, all response parsing and sanitization
+scripts/cast.py  the Chromecast bridge, newline JSON on stdin/stdout
 BarWidget.qml    the collapsed bar presence, and host for the panel popup
 Panel.qml        the expanded panel
 NtsMark.qml      the station mark

@@ -263,6 +263,52 @@ function nextRefreshDelay(show, nowMs, intervalMs, minimumMs) {
   return delay
 }
 
+// ------------------------------------------------------------------ casting
+
+// Devices reported by scripts/cast.py. The helper is ours, but the names and
+// models inside come from whatever is on the network, so they get the same
+// sanitizing treatment as anything from NTS.
+function castDevices(raw) {
+  if (!raw || !raw.length) return []
+  var out = []
+  for (var i = 0; i < raw.length && out.length < 12; i++) {
+    var entry = raw[i]
+    if (!entry || typeof entry !== "object") continue
+    var uuid = plainText(entry.uuid, 80)
+    if (!/^[A-Za-z0-9-]{8,80}$/.test(uuid)) continue
+    var name = plainText(entry.name, 60)
+    out.push({
+      uuid: uuid,
+      name: name === "" ? "Cast device" : name,
+      model: plainText(entry.model, 60)
+    })
+  }
+  return out
+}
+
+function hasDevice(devices, uuid) {
+  if (!devices || !devices.length) return false
+  for (var i = 0; i < devices.length; i++) {
+    if (devices[i].uuid === String(uuid)) return true
+  }
+  return false
+}
+
+function deviceName(devices, uuid, fallback) {
+  if (devices) {
+    for (var i = 0; i < devices.length; i++) {
+      if (devices[i].uuid === String(uuid)) return devices[i].name
+    }
+  }
+  return fallback === undefined ? "" : fallback
+}
+
+// Output selection is persisted, so it has to survive a round trip through
+// shell.json as plain strings.
+function outputModeFromSetting(value) {
+  return String(value || "") === "cast" ? "cast" : "local"
+}
+
 function clampVolume(value) {
   var n = Math.round(Number(value))
   if (!isFinite(n)) return 70
@@ -311,6 +357,10 @@ if (typeof module !== "undefined") {
     barTitle: barTitle,
     mprisTitle: mprisTitle,
     nextRefreshDelay: nextRefreshDelay,
+    castDevices: castDevices,
+    hasDevice: hasDevice,
+    deviceName: deviceName,
+    outputModeFromSetting: outputModeFromSetting,
     clampVolume: clampVolume,
     ipcCommand: ipcCommand,
     parseIpcLine: parseIpcLine

@@ -24,6 +24,8 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "sjfortin.nts-radio"
+  readonly property string pluginDir: manifest && manifest.__sourceDir
+    ? String(manifest.__sourceDir) : ""
 
   // ------------------------------------------------------------- settings
   //
@@ -35,6 +37,14 @@ Item {
   property int volume: 70
   property int refreshMinutes: 1
   property bool settingsAdopted: false
+
+  // Where audio goes: "local" (mpv on this machine) or "cast" (a Chromecast
+  // device fetches the stream itself). The chosen device is remembered by
+  // uuid so it can be reconnected without the user picking it again.
+  property string outputMode: "local"
+  property string castUuid: ""
+  property string castName: ""
+  readonly property bool casting: outputMode === "cast"
 
   // Raised when the user changes something a widget should write to
   // shell.json. Widgets listen and call their own persist path.
@@ -56,7 +66,7 @@ Item {
   function adoptSettings(values) {
     if (settingsAdopted || !values) return
     if (values.channel === undefined && values.volume === undefined
-      && values.refreshMinutes === undefined) return
+      && values.refreshMinutes === undefined && values.output === undefined) return
 
     settingsAdopted = true
     applySettings(values)
@@ -81,7 +91,15 @@ Item {
     }
     if (values.refreshMinutes !== undefined)
       refreshMinutes = Math.max(1, Math.min(30, Math.floor(Number(values.refreshMinutes)) || 1))
+    if (values.castDevice !== undefined) {
+      castUuid = Model.plainText(values.castDevice, 80)
+      castName = Model.plainText(values.castDeviceName, 60)
+      caster.targetUuid = castUuid
+      caster.targetName = castName
+    }
+    if (values.output !== undefined) outputMode = Model.outputModeFromSetting(values.output)
     player.volume = volume
+    caster.volume = volume
     applyingSettings = false
   }
 
@@ -89,7 +107,10 @@ Item {
   function persistableSettings() {
     return {
       channel: Model.channelSettingValue(channel),
-      volume: Model.clampVolume(volume)
+      volume: Model.clampVolume(volume),
+      output: outputMode,
+      castDevice: castUuid,
+      castDeviceName: castName
     }
   }
 
@@ -140,7 +161,7 @@ Item {
   }
 
   function scheduleNextRefresh() {
-    var interval = uiActive || player.wanted
+    var interval = uiActive || player.wanted || caster.wanted
       ? refreshMinutes * 60000
       // Nothing is playing and nothing is on screen: the only reason to keep
       // any schedule at all is so the bar is not stale the moment it is
@@ -203,21 +224,42 @@ Item {
 
   // --------------------------------------------------------------- playback
 
-  readonly property bool playing: player.playing
-  readonly property bool loading: player.loading
-  readonly property bool stopped: !player.playing && !player.loading
-  readonly property string playbackError: player.lastError
+  // Every playback question routes to whichever backend owns the audio, so
+  // the widget and panel never have to know which one that is.
+  readonly property bool playing: casting ? caster.playing : player.playing
+  readonly property bool loading: casting ? caster.loading : player.loading
+  readonly property bool stopped: !playing && !loading
+  readonly property string playbackError: casting ? caster.lastError : player.lastError
+
+  // Local playback needs mpv; casting needs python-pychromecast. Neither is
+  // something a plugin may install, so the UI has to be able to say which one
+  // is missing rather than reporting a generic failure.
+  property bool mpvAvailable: true
+  readonly property bool castAvailable: caster.available
+  readonly property string castUnavailableReason: caster.unavailableReason
+  readonly property var castDevices: caster.devices
+  readonly property bool castDiscovering: caster.discovering
+  readonly property bool castConnected: caster.connected
+  readonly property string castTargetName: caster.targetName || castName
 
   function play() {
-    player.streamUrl = Model.streamUrl(channel)
-    player.play()
+    if (casting) {
+      caster.streamUrl = Model.streamUrl(channel)
+      caster.play()
+    } else {
+      player.streamUrl = Model.streamUrl(channel)
+      player.play()
+    }
     refreshIfStale()
   }
 
-  function pause() { player.pause() }
+  function pause() {
+    if (casting) caster.stop()
+    else player.pause()
+  }
 
   function togglePlayback() {
-    if (player.playing || player.loading) player.pause()
+    if (playing || loading) pause()
     else play()
   }
 
@@ -225,7 +267,9 @@ Item {
     var wanted = Model.channelNumber(number)
     if (wanted === channel) return
     channel = wanted
-    player.switchStream(Model.streamUrl(wanted))
+    var url = Model.streamUrl(wanted)
+    player.switchStream(url)
+    caster.switchStream(url)
     pushMprisTitle()
     requestPersist()
     refreshIfStale()
@@ -235,9 +279,38 @@ Item {
     var wanted = Model.clampVolume(value)
     if (wanted === volume) return
     volume = wanted
-    player.setVolume(wanted)
+    if (casting) caster.setVolume(wanted)
+    else player.setVolume(wanted)
     volumePersist.restart()
   }
+
+  // Moving the audio between this machine and a device. Playback follows the
+  // move: if it was playing, it is playing when the move finishes.
+  function setOutput(mode, uuid, name) {
+    var wantedMode = Model.outputModeFromSetting(mode)
+    var wantedUuid = wantedMode === "cast" ? Model.plainText(uuid, 80) : ""
+    if (wantedMode === outputMode && wantedUuid === castUuid) return
+
+    var wasPlaying = playing || loading
+
+    // Stop the backend that is losing the audio before the switch, or it
+    // carries on playing into a UI that no longer represents it.
+    if (casting) caster.stop()
+    else player.stop()
+
+    outputMode = wantedMode
+    if (wantedMode === "cast") {
+      castUuid = wantedUuid
+      castName = Model.plainText(name, 60) || Model.deviceName(caster.devices, wantedUuid, "")
+      caster.selectDevice(castUuid, castName)
+    }
+    requestPersist()
+    if (wasPlaying) play()
+  }
+
+  function castTo(uuid, name) { setOutput("cast", uuid, name) }
+  function castToLocal() { setOutput("local", "", "") }
+  function discoverCastDevices() { caster.discover() }
 
   // Dragging a slider should not write shell.json on every frame.
   Timer {
@@ -263,6 +336,69 @@ Item {
   Player {
     id: player
     pausedShutdownSeconds: 300
+  }
+
+  Caster {
+    id: caster
+    pluginDir: root.pluginDir
+    // The bridge is a Python process; it runs only while a panel is showing
+    // device choices or a cast is actually in progress.
+    bridgeEnabled: root.uiActive || caster.wanted
+    // Metadata is sent when playback starts, so the device and the Home app
+    // show the programme rather than the raw stream name. It is deliberately
+    // not resent on every schedule change: updating it means reloading the
+    // media, and a gap in the audio is worse than a stale title.
+    mediaTitle: Model.channelLabel(root.channel)
+    mediaSubtitle: root.now ? Model.barTitle(root.now) : ""
+    artworkUrl: root.now ? root.now.artworkLarge : ""
+  }
+
+  Connections {
+    target: caster
+
+    // A device can be adjusted from the Home app or its own touch controls.
+    function onVolumeChanged() {
+      if (!root.casting || root.volume === caster.volume) return
+      root.volume = caster.volume
+      volumePersist.restart()
+    }
+
+    // Casting keeps the schedule refreshing at the fast cadence the same way
+    // local playback does.
+    function onWantedChanged() { root.scheduleNextRefresh() }
+
+    // Remember a device the moment it is actually connected, name included,
+    // so the next session can reconnect without a discovery round trip.
+    function onTargetNameChanged() {
+      if (!root.casting || caster.targetName === "") return
+      if (caster.targetName === root.castName) return
+      root.castName = caster.targetName
+      root.requestPersist()
+    }
+
+    // A device can be chosen by uuid alone — from the IPC surface, or from a
+    // remembered setting saved before its name was known. Fill the name in
+    // from the first discovery that sees it, so the panel has something to
+    // call it even while it is offline.
+    function onDevicesChanged() {
+      if (root.castUuid === "" || root.castName !== "") return
+      var found = Model.deviceName(caster.devices, root.castUuid, "")
+      if (found === "") return
+      root.castName = found
+      root.requestPersist()
+    }
+  }
+
+  // mpv is the local backend and cannot be installed by a plugin, so its
+  // absence is a first-class state rather than a stream error.
+  Process {
+    id: mpvProbe
+    running: true
+    command: ["sh", "-c", "command -v mpv >/dev/null 2>&1 && echo yes || echo no"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.mpvAvailable = String(text || "").indexOf("yes") === 0
+    }
   }
 
   Connections {
@@ -333,12 +469,46 @@ Item {
       return String(root.volume)
     }
 
+    // Move audio between this machine and a device.
+    //   omarchy-shell nts-radio output local
+    //   omarchy-shell nts-radio output cast          (single device, or remembered)
+    //   omarchy-shell nts-radio output <device-uuid>
+    function output(target: string): string {
+      var wanted = String(target || "").trim()
+      if (wanted === "" || wanted === "local" || wanted === "this") {
+        root.castToLocal()
+        return "local"
+      }
+      if (wanted === "cast") {
+        root.castTo(root.castUuid, root.castName)
+        return root.castUuid === "" ? "cast (device will be chosen on connect)" : root.castUuid
+      }
+      root.castTo(wanted, Model.deviceName(root.castDevices, wanted, ""))
+      return wanted
+    }
+
+    function devices(): string {
+      root.discoverCastDevices()
+      return JSON.stringify({
+        available: root.castAvailable,
+        reason: root.castUnavailableReason,
+        discovering: root.castDiscovering,
+        devices: root.castDevices
+      })
+    }
+
     function status(): string {
       return JSON.stringify({
         channel: root.channel,
         playing: root.playing,
         loading: root.loading,
         volume: root.volume,
+        output: root.outputMode,
+        castDevice: root.castTargetName,
+        castUuid: root.castUuid,
+        castConnected: root.castConnected,
+        castAvailable: root.castAvailable,
+        mpvAvailable: root.mpvAvailable,
         mpris: root.mprisAvailable,
         title: root.now ? root.now.title : "",
         show: root.now ? root.now.showName : "",
@@ -360,6 +530,7 @@ Item {
   }
 
   Component.onDestruction: {
+    caster.stop()
     player.stop()
     // mpv does not unlink its IPC socket on exit. Harmless (it lives in the
     // runtime dir and the next mpv rebinds it), but leaving files behind
