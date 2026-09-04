@@ -7,6 +7,7 @@ import qs.Ui
 // one that gets instantiated.
 import "." as Nts
 import "Model.js" as Model
+import "NtsApi.js" as NtsApi
 
 // Collapsed bar presence: the station mark, the channel, an on-air square,
 // and — when there is room for it — the current broadcast title.
@@ -29,7 +30,23 @@ BarWidget {
   readonly property int channel: service ? service.channel : 1
   readonly property bool playing: service ? service.playing : false
   readonly property bool loading: service ? service.loading : false
-  readonly property string showTitle: service ? Model.barTitle(service.now) : ""
+
+  // The bar always reflects what is actually on the air, which since Phase 2
+  // is not necessarily live radio. An archived episode replaces both the
+  // channel token and the title, so the widget never claims to be playing NTS 2
+  // while a two-year-old show is coming out of the speakers.
+  readonly property bool archive: service ? service.archiveMode : false
+  readonly property var archiveEpisode: service ? service.archiveEpisode : null
+
+  readonly property string showTitle: {
+    if (!service) return ""
+    if (archive) return archiveEpisode ? archiveEpisode.name : ""
+    return Model.barTitle(service.now)
+  }
+
+  // Where the channel number goes. "ARC" is short enough for a bar and is
+  // spelled out as "Archive" in the tooltip and the panel.
+  readonly property string sourceToken: archive ? "ARC" : String(channel)
 
   readonly property string titleMode: String(root.setting("showTitleInBar", "When playing"))
   readonly property int maxTitleWidth: Math.max(0, Math.min(480,
@@ -149,7 +166,7 @@ BarWidget {
     Text {
       anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
-      text: String(root.channel)
+      text: root.sourceToken
       color: root.ink
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.bodySmall
@@ -220,7 +237,7 @@ BarWidget {
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
       textFormat: Text.PlainText
-      text: String(root.channel)
+      text: root.sourceToken
       color: root.ink
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.bodySmall
@@ -237,7 +254,13 @@ BarWidget {
     onClicked: function(mouse) {
       if (!root.service) return
       if (mouse.button === Qt.MiddleButton) root.service.togglePlayback()
-      else if (mouse.button === Qt.RightButton) root.service.setChannel(root.channel === 1 ? 2 : 1)
+      else if (mouse.button === Qt.RightButton) {
+        // From an archive, the other channel is not the obvious next step —
+        // getting back to live radio at all is. So the first right-click
+        // returns to live and further ones flip channels as before.
+        if (root.archive) root.service.playLive(root.channel)
+        else root.service.setChannel(root.channel === 1 ? 2 : 1)
+      }
       else root.togglePanel()
     }
 
@@ -252,9 +275,16 @@ BarWidget {
 
   function tooltip() {
     var state = playing ? "On air" : (loading ? "Connecting" : "Stopped")
-    var line = Model.channelLabel(channel) + " · " + state
+    var line = archive ? "Archive · " + state : Model.channelLabel(channel) + " · " + state
+    if (archive && service && service.durationSec > 0) {
+      line += " · " + NtsApi.clockFromSeconds(service.positionSec)
+        + " / " + NtsApi.clockFromSeconds(service.durationSec)
+    }
     if (showTitle !== "") line += "\n" + showTitle
-    return line + "\nClick for the panel · middle-click to play · right-click to switch channel"
+    var last = archive
+      ? "Click for the panel · middle-click to pause · right-click for live radio"
+      : "Click for the panel · middle-click to play · right-click to switch channel"
+    return line + "\n" + last
   }
 
   PopupCard {

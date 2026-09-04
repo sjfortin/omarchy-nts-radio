@@ -3,10 +3,17 @@ import Quickshell
 import Quickshell.Io
 
 import "Model.js" as Model
+import "NtsApi.js" as NtsApi
+import "Library.js" as Library
 
-// Shared state for every NTS bar widget instance (one per monitor) and the
-// panel each of them can open. Playback and the schedule live here so that
-// closing a panel — or moving the widget — never interrupts the stream.
+// Shared state for every NTS bar widget instance (one per monitor), the panel
+// each of them can open, and the browser window. Playback, the schedule, the
+// API client and the local library all live here so that closing a panel,
+// closing the browser, or moving the widget never interrupts the stream.
+//
+// Phase 2 added a second medium — archived episodes alongside live radio —
+// and the browser window that finds them. Both surfaces drive this one object;
+// neither owns playback.
 //
 // The shell creates exactly one of these per enabled plugin and destroys it
 // when the plugin is disabled, which is also when mpv goes away.
@@ -229,12 +236,34 @@ Item {
 
   // --------------------------------------------------------------- playback
 
+  // What is on the air right now: "live" for NTS 1/2, "archive" for a show
+  // out of the archive. This is the single fact the bar widget, the panel and
+  // the browser all read to decide what they are looking at.
+  property string playbackMode: "live"
+  readonly property bool archiveMode: playbackMode === "archive"
+
+  // The episode an archive session is playing, in NtsApi's episode shape.
+  property var archiveEpisode: null
+  readonly property bool hasArchiveEpisode: archiveEpisode !== null && archiveEpisode.valid === true
+
+  // Casting is a live-radio capability. A Chromecast fetches the stream URL
+  // itself, and an archived episode has no such URL — only a SoundCloud page
+  // that has to be resolved on this machine first. Archives therefore always
+  // play locally, whatever output is selected; the choice is remembered and
+  // takes effect again the moment live radio comes back.
+  readonly property bool castingAudio: casting && !archiveMode
+
   // Every playback question routes to whichever backend owns the audio, so
   // the widget and panel never have to know which one that is.
-  readonly property bool playing: casting ? caster.playing : player.playing
-  readonly property bool loading: casting ? caster.loading : player.loading
+  readonly property bool playing: castingAudio ? caster.playing : player.playing
+  readonly property bool loading: castingAudio ? caster.loading : player.loading
   readonly property bool stopped: !playing && !loading
-  readonly property string playbackError: casting ? caster.lastError : player.lastError
+  readonly property string playbackError: castingAudio ? caster.lastError : player.lastError
+
+  // Position and length, in seconds. Both are 0 for live, which has neither.
+  readonly property real positionSec: archiveMode ? player.positionSec : 0
+  readonly property real durationSec: archiveMode ? player.durationSec : 0
+  readonly property bool canSeek: archiveMode && durationSec > 0
 
   // Local playback needs mpv; casting needs python-pychromecast. Neither is
   // something a plugin may install, so the UI has to be able to say which one
@@ -248,7 +277,12 @@ Item {
   readonly property string castTargetName: caster.targetName || castName
 
   function play() {
-    if (casting) {
+    if (archiveMode) {
+      // The episode is already loaded into the player; this is a resume.
+      player.play()
+      return
+    }
+    if (castingAudio) {
       caster.streamUrl = Model.streamUrl(channel)
       caster.play()
     } else {
@@ -259,7 +293,14 @@ Item {
   }
 
   function pause() {
-    if (casting) caster.stop()
+    if (archiveMode) {
+      // Note where it stopped before the process can be reaped, so the shelf
+      // is right even if the user never comes back to it this session.
+      player.pause()
+      saveProgress()
+      return
+    }
+    if (castingAudio) caster.stop()
     else player.pause()
   }
 
@@ -268,8 +309,108 @@ Item {
     else play()
   }
 
+  // -------------------------------------------------------- archive playback
+
+  // Put an archived episode on the air. `startSec` resumes a part-heard show;
+  // pass 0 (or nothing) to start from the top, and the remembered position is
+  // used automatically when there is one.
+  function playEpisode(episode, startSec) {
+    if (!episode || !episode.valid) return false
+    if (!episode.audioUrl) {
+      // NTS lists episodes it has no audio for — a broadcast that was never
+      // uploaded, or one taken down. Saying so is better than a dead button.
+      archiveError = "This episode has no audio on NTS"
+      return false
+    }
+    if (!ytdlAvailable) {
+      archiveError = "yt-dlp is not installed — sudo pacman -S yt-dlp"
+      return false
+    }
+
+    archiveError = ""
+
+    // Whatever was playing is losing the audio. A cast device keeps playing
+    // the live stream on its own if it is not told to stop.
+    if (caster.wanted) caster.stop()
+
+    // Leaving one episode for another: record where we got to in the old one
+    // before its position is overwritten.
+    if (archiveMode && hasArchiveEpisode && !NtsApi.sameEpisode(archiveEpisode, episode))
+      saveProgress()
+
+    var resume = Number(startSec)
+    if (!isFinite(resume) || resume < 0) resume = Library.resumePosition(library, episode)
+
+    archiveEpisode = episode
+    playbackMode = "archive"
+    player.mediaTitle = archiveMprisTitle(episode)
+    player.loadSource("archive", episode.audioUrl, resume)
+    return true
+  }
+
+  // Back to live radio, optionally on a specific channel.
+  function playLive(number) {
+    var wanted = number === undefined ? channel : Model.channelNumber(number)
+    // Whatever went wrong with the archive is no longer on screen or on the
+    // air, so the message should not outlive it.
+    archiveError = ""
+    if (archiveMode) {
+      saveProgress()
+      player.stop()
+      archiveEpisode = null
+      playbackMode = "live"
+    }
+    if (wanted !== channel) {
+      channel = wanted
+      requestPersist()
+    }
+    var url = Model.streamUrl(channel)
+    player.mode = "live"
+    player.streamUrl = url
+    caster.streamUrl = url
+    pushMprisTitle()
+    play()
+  }
+
+  function seekTo(seconds) {
+    if (!archiveMode) return
+    player.seekTo(seconds)
+    // A scrub is a deliberate move; remember it straight away rather than
+    // waiting for the next progress tick.
+    progressSave.restart()
+  }
+
+  function seekBy(delta) {
+    if (!archiveMode) return
+    seekTo(player.positionSec + Number(delta || 0))
+  }
+
+  // Is this episode the one currently on the air?
+  function isCurrentEpisode(episode) {
+    return archiveMode && NtsApi.sameEpisode(archiveEpisode, episode)
+  }
+
+  function archiveMprisTitle(episode) {
+    if (!episode) return "NTS"
+    var name = episode.name || episode.showName
+    return name ? "NTS — " + name : "NTS"
+  }
+
+  // A failure that belongs to the archive rather than to the player: no audio
+  // listed, or no resolver installed. Cleared by the next successful start.
+  property string archiveError: ""
+
   function setChannel(number) {
     var wanted = Model.channelNumber(number)
+
+    // Choosing a channel while an archive is playing means "take me back to
+    // live radio", which is a change of medium even when the channel number
+    // is the one already selected.
+    if (archiveMode) {
+      playLive(wanted)
+      return
+    }
+
     if (wanted === channel) return
     channel = wanted
     var url = Model.streamUrl(wanted)
@@ -284,7 +425,7 @@ Item {
     var wanted = Model.clampVolume(value)
     if (wanted === volume) return
     volume = wanted
-    if (casting) caster.setVolume(wanted)
+    if (castingAudio) caster.setVolume(wanted)
     else player.setVolume(wanted)
     volumePersist.restart()
   }
@@ -300,6 +441,20 @@ Item {
     var alreadyThere = wantedMode === outputMode
       && (wantedMode !== "cast" || wantedUuid === "" || wantedUuid === castUuid)
     if (alreadyThere) return
+
+    // An archive cannot follow the audio to a cast device, so choosing one
+    // mid-episode records the preference and leaves playback alone. It takes
+    // effect the next time live radio is on.
+    if (archiveMode) {
+      outputMode = wantedMode
+      if (wantedMode === "cast") {
+        castUuid = wantedUuid
+        castName = Model.plainText(name, 60) || Model.deviceName(caster.devices, wantedUuid, "")
+        caster.selectDevice(castUuid, castName)
+      }
+      requestPersist()
+      return
+    }
 
     var wasPlaying = playing || loading
 
@@ -330,10 +485,167 @@ Item {
   }
 
   function pushMprisTitle() {
+    // An archive owns the media title for as long as it is playing; the live
+    // schedule moving on underneath must not relabel it.
+    if (archiveMode) return
     player.mediaTitle = Model.mprisTitle(channel, now)
   }
 
   onNowChanged: pushMprisTitle()
+
+  // ---------------------------------------------------------------- browser
+
+  // The full browser window. It is an `overlay` entry point on this same
+  // plugin, so the shell hands it this very object as `service` — which is
+  // what makes playback survive the window opening and closing.
+  function openBrowser() {
+    if (!shell || typeof shell.summon !== "function") return false
+    return shell.summon(pluginId, "{}") === true
+  }
+
+  function toggleBrowser() {
+    if (!shell || typeof shell.toggle !== "function") return false
+    shell.toggle(pluginId, "{}")
+    return true
+  }
+
+  function closeBrowser() {
+    if (!shell || typeof shell.hide !== "function") return false
+    return shell.hide(pluginId) === true
+  }
+
+  readonly property bool browserOpen: shell && typeof shell.isPluginOpen === "function"
+    ? shell.isPluginOpen(pluginId) : false
+
+  // Opens whatever is playing on nts.live — the archived episode when there
+  // is one, otherwise the live broadcast.
+  function openCurrent() {
+    if (archiveMode && hasArchiveEpisode) openExternal(archiveEpisode.url)
+    else openCurrentShow()
+  }
+
+  // Every URL that reaches the browser passes through here. Model and NtsApi
+  // only ever build https://www.nts.live/... links, but this is the boundary
+  // where a parser bug would become someone else's problem, so it is checked
+  // once more on the way out.
+  function openExternal(url) {
+    var target = String(url || "")
+    if (target.indexOf(Model.SITE_URL) !== 0 && !/^https:\/\/[a-zA-Z0-9.-]+\//.test(target))
+      target = Model.SITE_URL
+    Quickshell.execDetached(["xdg-open", target])
+  }
+
+  // -------------------------------------------------------------- api client
+
+  // The one place the plugin talks to nts.live. Pages ask this for parsed
+  // results; nothing else in the plugin opens a socket.
+  readonly property alias api: apiClient
+
+  Api { id: apiClient }
+
+  // ----------------------------------------------------------------- library
+
+  // Saved shows, saved episodes and resume positions, in a file the user owns.
+  // See Library.js for why this is local rather than account-backed.
+  property var library: Library.emptyLibrary()
+
+  readonly property string libraryDir: {
+    var stateHome = String(Quickshell.env("XDG_STATE_HOME") || "")
+    var base = stateHome !== "" ? stateHome : String(Quickshell.env("HOME") || "") + "/.local/state"
+    return base + "/omarchy/nts-radio"
+  }
+  readonly property string libraryPath: libraryDir + "/library.json"
+
+  // Set once the file has been read (or found missing). Saving before this
+  // would write an empty library over a real one.
+  property bool libraryLoaded: false
+
+  function saveLibrary() {
+    if (!libraryLoaded) return
+    libraryFile.setText(Library.serialize(library) + "\n")
+  }
+
+  function toggleSaveShow(show) {
+    if (!show || !show.alias) return
+    library = Library.toggleShow(library, show, Date.now())
+    saveLibrary()
+  }
+
+  function toggleSaveEpisode(episode) {
+    if (!episode || !episode.valid) return
+    library = Library.toggleEpisode(library, episode, Date.now())
+    saveLibrary()
+  }
+
+  function isShowSaved(alias) { return Library.hasShow(library, alias) }
+  function isEpisodeSaved(episode) { return Library.hasEpisode(library, episode) }
+  function resumePositionFor(episode) { return Library.resumePosition(library, episode) }
+
+  // Fold the current archive position into the library. Cheap and idempotent:
+  // Library.noteProgress returns the same object when nothing moved, and an
+  // unchanged object means no disk write.
+  function saveProgress() {
+    if (!archiveMode || !hasArchiveEpisode || !libraryLoaded) return
+    var updated = Library.noteProgress(library, archiveEpisode,
+      player.positionSec, player.durationSec, Date.now())
+    if (updated === library) return
+    library = updated
+    saveLibrary()
+  }
+
+  // Every 15s while an archive is actually moving. Often enough that killing
+  // the shell loses almost nothing, rare enough to be invisible.
+  Timer {
+    id: progressSave
+    interval: 15000
+    repeat: true
+    running: root.archiveMode && root.playing
+    onTriggered: root.saveProgress()
+  }
+
+  Connections {
+    target: player
+
+    // The recording ran out. Clear the resume entry so it does not sit on the
+    // "continue listening" shelf at 99%, and leave the episode loaded so the
+    // UI still shows what just finished.
+    function onFinished() {
+      if (!root.archiveMode || !root.hasArchiveEpisode) return
+      root.library = Library.clearResume(root.library, root.archiveEpisode)
+      root.saveLibrary()
+    }
+  }
+
+  // The directory will not exist on a first run, and FileView will not create
+  // it. Cheap enough to do unconditionally at startup.
+  Process {
+    id: libraryDirInit
+    running: true
+    command: ["mkdir", "-p", root.libraryDir]
+    onExited: libraryFile.reload()
+  }
+
+  FileView {
+    id: libraryFile
+    path: root.libraryPath
+    watchChanges: false
+    // The library is rewritten in full on every change; a torn file after a
+    // crash would lose the lot.
+    atomicWrites: true
+    printErrors: false
+
+    onLoaded: {
+      root.library = Library.load(text())
+      root.libraryLoaded = true
+    }
+
+    // No file yet, or an unreadable one. Either way an empty library is the
+    // right starting point — never a reason to keep the browser from opening.
+    onLoadFailed: function(error) {
+      root.library = Library.emptyLibrary()
+      root.libraryLoaded = true
+    }
+  }
 
   function openCurrentShow() {
     var url = now && now.url ? String(now.url) : Model.SITE_URL
@@ -411,6 +723,24 @@ Item {
     }
   }
 
+  // Archived episodes live on SoundCloud and Mixcloud, not on NTS, so playing
+  // one needs a resolver. Live radio does not, which is why this is a separate
+  // question from mpv: the plugin stays fully useful without it and only the
+  // archive half goes quiet.
+  property bool ytdlAvailable: true
+
+  Process {
+    id: ytdlProbe
+    running: true
+    command: ["sh", "-c",
+      'for candidate in yt-dlp youtube-dl; do ' +
+      'command -v "$candidate" >/dev/null 2>&1 && { echo yes; exit 0; }; done; echo no']
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.ytdlAvailable = String(text || "").indexOf("yes") === 0
+    }
+  }
+
   Connections {
     target: player
 
@@ -468,6 +798,51 @@ Item {
     function toggle(): void { root.togglePlayback() }
     function next(): void { root.setChannel(root.channel === 1 ? 2 : 1) }
 
+    // The browser window.
+    //   omarchy-shell nts-radio browser
+    function browser(): string {
+      root.toggleBrowser()
+      return "ok"
+    }
+
+    // Back to live radio from an archived show.
+    //   omarchy-shell nts-radio live
+    //   omarchy-shell nts-radio live 2
+    function live(number: string): string {
+      var wanted = String(number || "").trim()
+      root.playLive(wanted === "" ? root.channel : Model.channelNumber(wanted))
+      return Model.channelLabel(root.channel)
+    }
+
+    // Play an archived episode by its NTS aliases, the two path segments of
+    // its nts.live URL:
+    //   omarchy-shell nts-radio episode floating-points floating-points-27th-july-2026
+    function episode(showAlias: string, episodeAlias: string): string {
+      var show = Model.safeAlias(showAlias)
+      var slot = Model.safeAlias(episodeAlias)
+      if (!show || !slot) return "usage: episode <show-alias> <episode-alias>"
+      root.api.episode(show, slot, function(parsed, ok) {
+        if (!ok || !parsed) {
+          root.archiveError = "Could not find that episode"
+          return
+        }
+        root.playEpisode(parsed, -1)
+      })
+      return "loading " + show + "/" + slot
+    }
+
+    // Seek within an archived show. Accepts absolute seconds, or a relative
+    // offset with a sign: `seek 90`, `seek +30`, `seek -30`.
+    function seek(position: string): string {
+      if (!root.archiveMode) return "not playing an archive"
+      var raw = String(position || "").trim()
+      var value = parseFloat(raw)
+      if (!isFinite(value)) return "usage: seek [+|-]<seconds>"
+      if (raw.charAt(0) === "+" || raw.charAt(0) === "-") root.seekBy(value)
+      else root.seekTo(value)
+      return NtsApi.clockFromSeconds(root.positionSec)
+    }
+
     function channel(number: string): string {
       root.setChannel(Model.channelNumber(number))
       return Model.channelLabel(root.channel)
@@ -508,12 +883,35 @@ Item {
     }
 
     function status(): string {
+      // The live fields keep the shape the MVP published, so anything already
+      // parsing this output keeps working; the archive block is additive and
+      // is only meaningful while mode is "archive".
       return JSON.stringify({
+        mode: root.playbackMode,
         channel: root.channel,
         playing: root.playing,
         loading: root.loading,
         volume: root.volume,
         output: root.outputMode,
+        archive: root.archiveMode && root.hasArchiveEpisode ? {
+          show: root.archiveEpisode.showName || root.archiveEpisode.name,
+          title: root.archiveEpisode.name,
+          showAlias: root.archiveEpisode.showAlias,
+          episodeAlias: root.archiveEpisode.episodeAlias,
+          url: root.archiveEpisode.url,
+          position: Math.floor(root.positionSec),
+          duration: Math.floor(root.durationSec),
+          positionLabel: NtsApi.clockFromSeconds(root.positionSec),
+          durationLabel: NtsApi.clockFromSeconds(root.durationSec)
+        } : null,
+        saved: {
+          shows: root.library.shows.length,
+          episodes: root.library.episodes.length,
+          continueListening: root.library.resume.length
+        },
+        browserOpen: root.browserOpen,
+        ytdlAvailable: root.ytdlAvailable,
+        archiveError: root.archiveError,
         castDevice: root.castTargetName,
         castUuid: root.castUuid,
         castConnected: root.castConnected,
@@ -540,6 +938,9 @@ Item {
   }
 
   Component.onDestruction: {
+    // Last chance to remember where an archive got to: the plugin is being
+    // disabled or the shell is going down, and mpv is about to be killed.
+    saveProgress()
     caster.stop()
     player.stop()
     // mpv does not unlink its IPC socket on exit. Harmless (it lives in the

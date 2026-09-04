@@ -25,6 +25,24 @@ Item {
   // --------------------------------------------------------------- inputs
 
   property string streamUrl: ""
+
+  // "live" or "archive". The two are genuinely different media and the
+  // difference runs right through this file: a live stream has no end, no
+  // position and no seek, and resuming it means rejoining the edge rather
+  // than unpausing. An archived show is an ordinary finite recording that
+  // pauses, seeks, and finishes. Keeping them apart here is what stops the
+  // live reconnect logic from fighting a paused archive.
+  property string mode: "live"
+  readonly property bool isArchive: mode === "archive"
+
+  // The SoundCloud/Mixcloud page URL for an archived episode. NTS does not
+  // host episode audio, so mpv's ytdl hook resolves this at load time.
+  property string archiveUrl: ""
+
+  // Where to start an archive, in seconds. Used to resume a part-heard show,
+  // and to reach a tracklist timestamp when the process is not up yet.
+  property real startPositionSec: 0
+
   // Shown by MPRIS clients and media-key OSDs. Pushed live, so the OSD
   // follows the NTS schedule rather than the icy stream name.
   property string mediaTitle: ""
@@ -58,6 +76,16 @@ Item {
   readonly property bool loading: wanted && !paused && !playing
   readonly property bool failed: lastError !== ""
 
+  // Archive position and length, in seconds. Both stay 0 for live, where
+  // neither means anything. Position is polled rather than observed: mpv
+  // pushes a time-pos property-change on every internal tick, which is a
+  // flood of IPC lines for a number the UI only redraws once a second.
+  property real positionSec: 0
+  property real durationSec: 0
+
+  // The recording ran out. A live stream cannot raise this.
+  signal finished()
+
   // ---------------------------------------------------------------- state
 
   // Set around a loadfile we issued ourselves, so the resulting property
@@ -82,6 +110,21 @@ Item {
     wanted = true
     if (!mpv.running) {
       startProcess()
+      return
+    }
+    // An archived show is a recording: resuming means carrying on from where
+    // it was paused, which is the one thing a live stream must never do.
+    if (isArchive) {
+      if (ipcAvailable) {
+        send(["set_property", "pause", false])
+        paused = false
+      } else {
+        // No IPC to unpause with. Restart from the remembered position.
+        startPositionSec = positionSec
+        restarting = true
+        mpv.running = false
+        restartAfterStop.restart()
+      }
       return
     }
     // Already up. Whether it is paused or mid-reconnect, the correct move for
@@ -132,6 +175,67 @@ Item {
     else stop()
   }
 
+  // Move the player between media. Unlike switchStream — which swaps one live
+  // channel for another under a running process — this always tears the
+  // process down, because the mode decides the mpv command line: whether the
+  // ytdl hook is loaded at all, and where playback starts.
+  function loadSource(newMode, url, startSec) {
+    var hadProcess = mpv.running
+    if (hadProcess) {
+      // A stop we are about to follow with a start. Without this the exit
+      // reads as a dropped stream and flashes an error nobody had.
+      restarting = true
+      closeIpc()
+      mpv.running = false
+    }
+
+    mode = newMode === "archive" ? "archive" : "live"
+    if (isArchive) archiveUrl = String(url || "")
+    else streamUrl = String(url || "")
+
+    startPositionSec = Math.max(0, Number(startSec) || 0)
+    positionSec = startPositionSec
+    durationSec = 0
+    paused = false
+    connectedToStream = false
+    rejoining = false
+    retryCount = 0
+    lastError = ""
+    wanted = true
+
+    if (hadProcess) restartAfterStop.restart()
+    else startProcess()
+  }
+
+  // Jump to a point in an archived show — a tracklist timestamp, or a drag on
+  // the progress bar. Live has nothing to seek to.
+  function seekTo(seconds) {
+    if (!isArchive) return
+    var target = Math.max(0, Number(seconds) || 0)
+    if (durationSec > 0) target = Math.min(target, Math.max(0, durationSec - 1))
+    // Move the displayed position immediately. mpv confirms on the next poll,
+    // but a scrub that waits a second to redraw feels broken.
+    positionSec = target
+    if (ipcAvailable) {
+      send(["seek", target, "absolute"])
+      if (paused) {
+        send(["set_property", "pause", false])
+        paused = false
+        wanted = true
+      }
+      return
+    }
+    // No IPC: restart at the target, which lands in the same place.
+    startPositionSec = target
+    if (mpv.running) {
+      restarting = true
+      mpv.running = false
+      restartAfterStop.restart()
+    } else {
+      startProcess()
+    }
+  }
+
   // onVolumeChanged is the single place a volume reaches mpv.
   function setVolume(value) {
     volume = Model.clampVolume(value)
@@ -143,8 +247,10 @@ Item {
 
   // ------------------------------------------------------------- internals
 
+  readonly property string activeUrl: isArchive ? archiveUrl : streamUrl
+
   function startProcess() {
-    if (streamUrl === "") return
+    if (activeUrl === "") return
     restarting = false
     connectAttempts = 0
     ipcGaveUp = false
@@ -172,13 +278,9 @@ Item {
       "--quiet",
       "--msg-level=all=error",
       "--idle=no",
-      // A direct icecast URL never needs yt-dlp, and skipping the hook makes
-      // a failure surface in a second rather than after a scrape attempt.
-      "--ytdl=no",
       "--keep-open=no",
       "--network-timeout=10",
       "--cache=yes",
-      "--demuxer-max-bytes=4MiB",
       "--user-agent=omarchy-nts-radio",
       // No spaces: mpv's mpris script derives a D-Bus name from this, and a
       // space produces an invalid bus name and no MPRIS at all.
@@ -186,9 +288,28 @@ Item {
       "--volume=" + Model.clampVolume(volume),
       "--input-ipc-server=" + socketPath
     ]
+
+    if (isArchive) {
+      // NTS publishes archived episodes to SoundCloud and Mixcloud rather
+      // than hosting them, so the ytdl hook is what turns a page URL into
+      // audio. This is the only place the plugin needs it.
+      args.push("--ytdl=yes")
+      args.push("--ytdl-format=bestaudio/best")
+      // Two hours of AAC needs more room to seek around in than a live
+      // stream's few seconds of drift.
+      args.push("--demuxer-max-bytes=32MiB")
+      args.push("--demuxer-max-back-bytes=32MiB")
+      if (startPositionSec > 0) args.push("--start=" + Math.floor(startPositionSec))
+    } else {
+      // A direct icecast URL never needs yt-dlp, and skipping the hook makes
+      // a failure surface in a second rather than after a scrape attempt.
+      args.push("--ytdl=no")
+      args.push("--demuxer-max-bytes=4MiB")
+    }
+
     if (mediaTitle !== "") args.push("--force-media-title=" + mediaTitle)
     if (mprisScript !== "") args.push("--script=" + mprisScript)
-    args.push(streamUrl)
+    args.push(activeUrl)
     return args
   }
 
@@ -203,9 +324,19 @@ Item {
     // recovers from them. They are not something to put in front of a user.
     // If the stream really is broken, the process exit says so.
     if (/^\[(ffmpeg|lavf|ad|vd)/.test(message)) return ""
-    if (/^Failed to open /.test(message)) return "Stream unavailable"
-    if (/Failed to recognize file format/.test(message)) return "Stream unavailable"
-    if (/^Could not open/.test(message)) return "Stream unavailable"
+
+    // The ytdl hook is only in play for archives, and its failures are the
+    // ones a user can act on: a missing yt-dlp, or a private/removed upload.
+    if (/ytdl_hook|youtube-dl|yt-dlp/i.test(message)) {
+      if (/not found|no such file|could not be found/i.test(message))
+        return "yt-dlp is not installed — sudo pacman -S yt-dlp"
+      return "This episode could not be loaded"
+    }
+
+    var unavailable = isArchive ? "Episode unavailable" : "Stream unavailable"
+    if (/^Failed to open /.test(message)) return unavailable
+    if (/Failed to recognize file format/.test(message)) return unavailable
+    if (/^Could not open/.test(message)) return unavailable
     return message
   }
 
@@ -235,7 +366,10 @@ Item {
   }
 
   function rejoinLive() {
-    if (streamUrl === "") return
+    // Only live has an edge to rejoin. Reaching here in archive mode would
+    // restart the recording from the top, which is the worst possible reading
+    // of "resume".
+    if (isArchive || streamUrl === "") return
     rejoining = true
     connectedToStream = false
     paused = false
@@ -252,6 +386,12 @@ Item {
     }
   }
 
+  // Fixed request ids for the position poll, well clear of the rotating
+  // serial used by ordinary commands, so a reply can be identified by id
+  // alone rather than by keeping a table of outstanding requests.
+  readonly property int positionRequestId: 900001
+  readonly property int durationRequestId: 900002
+
   function observeProperties() {
     send(["observe_property", 1, "pause"])
     send(["observe_property", 2, "core-idle"])
@@ -259,13 +399,47 @@ Item {
     send(["observe_property", 4, "idle-active"])
   }
 
+  function pollPosition() {
+    if (!ipcAvailable || !isArchive) return
+    ipcSocket.write(Model.ipcCommand(["get_property", "time-pos"], positionRequestId))
+    ipcSocket.write(Model.ipcCommand(["get_property", "duration"], durationRequestId))
+    ipcSocket.flush()
+  }
+
   function handleLine(line) {
     var message = Model.parseIpcLine(line)
     if (!message) return
+
+    // A reply to one of the position polls above.
+    if (message.request_id === positionRequestId || message.request_id === durationRequestId) {
+      // mpv answers with error:"property unavailable" between files; that is
+      // ordinary, not a failure, so it is dropped rather than reported.
+      if (message.error !== "success") return
+      var value = Number(message.data)
+      if (!isFinite(value) || value < 0) return
+      if (message.request_id === positionRequestId) positionSec = value
+      else durationSec = value
+      return
+    }
+
     if (message.event === "file-loaded") {
       rejoining = false
       retryCount = 0
       lastError = ""
+      // The --start= seek has been applied by now, so it must not be applied
+      // again if this process is later restarted from a live position.
+      startPositionSec = 0
+      return
+    }
+    if (message.event === "end-file") {
+      // Only an archive can legitimately end. `reason` distinguishes the
+      // recording running out from an error or from our own loadfile.
+      if (isArchive && String(message.reason || "") === "eof") {
+        wanted = false
+        connectedToStream = false
+        positionSec = durationSec
+        root.finished()
+      }
       return
     }
     if (message.event !== "property-change") return
@@ -365,6 +539,23 @@ Item {
       }
       if (root.paused) return
       if (!root.wanted) return
+
+      // An archived show is finite, so a clean exit is the recording ending —
+      // the one case where stopping is the correct outcome and retrying would
+      // replay the whole two hours.
+      if (root.isArchive) {
+        if (exitCode === 0) {
+          root.wanted = false
+          root.positionSec = root.durationSec
+          root.finished()
+          return
+        }
+        // A genuine failure. Resume where it stopped rather than from the top.
+        root.startPositionSec = root.positionSec
+        if (root.lastError === "") root.lastError = "Episode unavailable"
+        if (!retryAfterFailure.running) retryAfterFailure.restart()
+        return
+      }
 
       // Still wanted audio and mpv is gone. A live stream has no legitimate
       // end, so a clean exit here means the relay dropped the connection —
@@ -470,8 +661,23 @@ Item {
     interval: Math.max(30, root.pausedShutdownSeconds) * 1000
     onTriggered: {
       if (!root.paused || !mpv.running) return
+      // Dropping the process loses mpv's place in the recording, so hand the
+      // position to the restart path before letting go of it. The user still
+      // sees a paused archive; pressing play resumes where they left off.
+      if (root.isArchive) root.startPositionSec = root.positionSec
       root.closeIpc()
       mpv.running = false
     }
+  }
+
+  // 1 Hz, and only while an archive is genuinely moving. Live has no position
+  // to report and a paused recording is not going anywhere, so neither polls.
+  Timer {
+    id: positionPoll
+    interval: 1000
+    repeat: true
+    running: root.isArchive && root.playing && root.ipcAvailable
+    triggeredOnStart: true
+    onTriggered: root.pollPosition()
   }
 }

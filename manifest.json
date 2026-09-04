@@ -2,27 +2,30 @@
   "schemaVersion": 1,
   "id": "sjfortin.nts-radio",
   "name": "NTS Radio",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "Sam Fortin",
   "license": "MIT",
-  "description": "NTS Radio 1 and 2 in the Omarchy bar: live show metadata, one-click channel switching, and local playback through mpv.",
+  "description": "NTS Radio for Omarchy: live NTS 1 and 2 in the bar, plus a full browser window for the archive \u2014 search, show and episode pages, tracklists with seekable timestamps, and a local library of saved shows and episodes.",
   "homepage": "https://github.com/sjfortin/omarchy-nts-radio",
   "kinds": [
     "service",
-    "bar-widget"
+    "bar-widget",
+    "overlay"
   ],
   "entryPoints": {
     "service": "Service.qml",
-    "barWidget": "BarWidget.qml"
+    "barWidget": "BarWidget.qml",
+    "overlay": "Browser.qml"
   },
   "barWidget": {
     "displayName": "NTS Radio",
-    "description": "Live NTS 1 / NTS 2 with now-playing and playback controls",
+    "description": "Live NTS 1 / NTS 2 and the archive browser, with now-playing and playback controls",
     "category": "Media",
     "aliases": [
       "nts",
       "radio",
-      "music"
+      "music",
+      "archive"
     ],
     "allowMultiple": false,
     "defaultSection": "right",

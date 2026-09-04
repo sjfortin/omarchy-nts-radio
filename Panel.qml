@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Ui
 
 import "Model.js" as Model
+import "NtsApi.js" as NtsApi
 
 // The expanded view: channel selector, the live broadcast, transport, and a
 // subordinate look at what is coming next.
@@ -29,15 +30,56 @@ Item {
   readonly property color paper: Color.popups.background
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
+  // Since Phase 2 the panel has two possible subjects: the live broadcast, or
+  // an archived episode. Rather than branching all through the layout, the
+  // whole "what is on air" question is answered once here and the layout below
+  // reads these.
+  readonly property bool archive: service ? service.archiveMode : false
+  readonly property var archiveEpisode: service ? service.archiveEpisode : null
+
   readonly property var show: service ? service.now : Model.emptyShow()
-  readonly property bool hasShow: show && show.valid === true
+  readonly property bool hasShow: archive
+    ? (archiveEpisode !== null && archiveEpisode.valid === true)
+    : (show && show.valid === true)
+
+  readonly property string subjectTitle: archive
+    ? (archiveEpisode ? archiveEpisode.name : "")
+    : (hasShow ? (show.title || show.showName) : "")
+
+  readonly property string subjectSubtitle: {
+    if (archive) return archiveEpisode ? archiveEpisode.showName : ""
+    if (!hasShow) return ""
+    // The broadcast title usually already carries the guest; the show name is
+    // only worth a line when it says something different.
+    return show.showName !== "" && show.showName !== show.title ? show.showName : ""
+  }
+
+  readonly property string subjectArtwork: archive
+    ? (archiveEpisode ? (archiveEpisode.artworkLarge || archiveEpisode.artworkSmall) : "")
+    : (show ? show.artworkLarge : "")
+
+  readonly property string subjectMeta: {
+    var parts = []
+    var source = archive ? archiveEpisode : show
+    if (!source) return ""
+    if (archive) {
+      var when = NtsApi.dateLabel(source.broadcastMs)
+      if (when) parts.push(when)
+    }
+    if (source.location) parts.push(source.location)
+    for (var i = 0; i < source.genres.length && parts.length < 3; i++) parts.push(source.genres[i])
+    return parts.join(" · ")
+  }
   readonly property double nowMs: service ? service.nowMs : Date.now()
   readonly property int channel: service ? service.channel : 1
   readonly property bool playing: service ? service.playing : false
   readonly property bool loading: service ? service.loading : false
 
   readonly property real controlHeight: Style.space(30)
-  readonly property string statusLabel: playing ? "On air" : (loading ? "Connecting" : "Off air")
+  readonly property string statusLabel: {
+    if (archive) return playing ? "Playing" : (loading ? "Loading" : "Paused")
+    return playing ? "On air" : (loading ? "Connecting" : "Off air")
+  }
 
   // One quiet line, never a notification. Playback problems outrank schedule
   // problems because the user asked for audio; a stale schedule is cosmetic.
@@ -58,6 +100,12 @@ Item {
     if (service.castUnavailableReason !== "") return "Casting needs python-pychromecast"
     return ""
   }
+
+  // Archived episodes are resolved on this machine before they can be played,
+  // so there is no URL a Chromecast could fetch for itself. The output choice
+  // is kept and takes effect again on live radio.
+  readonly property string archiveCastNote: archive && casting
+    ? "Archived shows play on this computer" : ""
 
   readonly property bool casting: service ? service.casting : false
   readonly property var castDevices: service ? service.castDevices : []
@@ -286,7 +334,7 @@ Item {
           id: channelBlock
           required property int modelData
 
-          readonly property bool selected: root.channel === modelData
+          readonly property bool selected: !root.archive && root.channel === modelData
           readonly property var live: root.service ? root.service.channelState(modelData) : Model.emptyChannel(modelData)
 
           width: (channels.width - Style.space(8)) / 2
@@ -371,7 +419,7 @@ Item {
           Image {
             anchors.fill: parent
             anchors.margins: 1
-            source: root.active && root.show ? root.show.artworkLarge : ""
+            source: root.active ? root.subjectArtwork : ""
             visible: status === Image.Ready
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
@@ -387,7 +435,7 @@ Item {
           // the panel.
           Caption {
             anchors.centerIn: parent
-            visible: !root.show || root.show.artworkSmall === ""
+            visible: root.subjectArtwork === ""
             text: "NTS"
             dim: 0.3
             font.bold: true
@@ -401,14 +449,14 @@ Item {
 
           Caption {
             width: parent.width
-            text: root.hasShow ? "Now" : (root.service && root.service.live ? "Now" : "Loading")
+            text: root.archive ? "Archive" : (root.hasShow || (root.service && root.service.live) ? "Now" : "Loading")
             dim: 0.45
           }
 
           Text {
             width: parent.width
             textFormat: Text.PlainText
-            text: root.hasShow ? (root.show.title || root.show.showName) : "—"
+            text: root.hasShow ? root.subjectTitle : "—"
             color: root.ink
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
@@ -421,10 +469,7 @@ Item {
           Text {
             width: parent.width
             textFormat: Text.PlainText
-            // The broadcast title usually already carries the guest; the show
-            // name is only worth a line when it says something different.
-            text: root.hasShow && root.show.showName !== "" && root.show.showName !== root.show.title
-              ? root.show.showName : ""
+            text: root.subjectSubtitle
             visible: text !== ""
             color: Util.alpha(root.ink, 0.65)
             font.family: root.fontFamily
@@ -436,14 +481,7 @@ Item {
             width: parent.width
             visible: text !== ""
             dim: 0.5
-            text: {
-              if (!root.hasShow) return ""
-              var parts = []
-              if (root.show.location !== "") parts.push(root.show.location)
-              for (var i = 0; i < root.show.genres.length && parts.length < 3; i++)
-                parts.push(root.show.genres[i])
-              return parts.join(" · ")
-            }
+            text: root.subjectMeta
           }
         }
       }
@@ -454,7 +492,7 @@ Item {
     Item {
       width: parent.width
       height: timeRow.implicitHeight + Style.space(8)
-      visible: root.hasShow && root.show.startMs > 0
+      visible: root.archive ? root.hasShow : (root.hasShow && root.show.startMs > 0)
 
       Column {
         id: timeRow
@@ -472,7 +510,10 @@ Item {
             height: parent.height
             radius: 0
             color: root.ink
-            width: parent.width * Model.progressFraction(root.show, root.nowMs)
+            width: parent.width * (root.archive
+              ? (root.service && root.service.durationSec > 0
+                 ? Math.max(0, Math.min(1, root.service.positionSec / root.service.durationSec)) : 0)
+              : Model.progressFraction(root.show, root.nowMs))
           }
         }
 
@@ -483,13 +524,20 @@ Item {
           Caption {
             id: startLabel
             anchors.left: parent.left
-            text: root.clock(root.show.startMs) + " – " + root.clock(root.show.endMs)
+            // Live shows a wall clock; an archive shows how far in you are,
+            // because "19:00 – 21:00" says nothing about a recording.
+            text: root.archive
+              ? (root.service ? NtsApi.clockFromSeconds(root.service.positionSec) : "0:00")
+              : root.clock(root.show.startMs) + " – " + root.clock(root.show.endMs)
             dim: 0.5
           }
 
           Caption {
             anchors.right: parent.right
-            text: Model.remainingLabel(root.show, root.nowMs)
+            text: root.archive
+              ? (root.service && root.service.durationSec > 0
+                 ? NtsApi.clockFromSeconds(root.service.durationSec) : "")
+              : Model.remainingLabel(root.show, root.nowMs)
             dim: 0.5
           }
         }
@@ -511,7 +559,7 @@ Item {
         // "Retrying" rather than a "Connecting" that never resolves: the
         // player backs off and keeps trying, and this button is also how the
         // user calls it off.
-        label: root.playing ? (root.casting ? "Stop" : "Pause")
+        label: root.playing ? (root.casting && !root.archive ? "Stop" : "Pause")
           : (root.loading ? (root.service && root.service.playbackError !== "" ? "Retrying" : "Connecting")
           : "Play")
         filled: root.playing
@@ -522,8 +570,7 @@ Item {
       Item {
         id: volumeSlot
         height: root.controlHeight
-        width: Math.max(Style.space(60),
-          transport.width - playButton.width - openButton.width - transport.spacing * 2)
+        width: Math.max(Style.space(60), transport.width - playButton.width - transport.spacing)
 
         Caption {
           id: volumeLabel
@@ -549,13 +596,44 @@ Item {
         }
       }
 
+    }
+
+    // The way out of the mini-player and into the full application, plus a
+    // one-press return to live radio when an archive has taken over.
+    Row {
+      width: parent.width
+      spacing: Style.space(8)
+
       BlockButton {
-        id: openButton
-        width: Style.space(74)
+        width: root.archive
+          ? (parent.width - Style.space(8) * 2) / 3
+          : (parent.width - Style.space(8)) / 2
+        height: root.controlHeight
+        label: "Browse"
+        enabledAction: root.service !== null
+        onActivated: {
+          if (root.service) root.service.openBrowser()
+          root.requestClose()
+        }
+      }
+
+      BlockButton {
+        visible: root.archive
+        width: (parent.width - Style.space(8) * 2) / 3
+        height: root.controlHeight
+        label: "Live"
+        enabledAction: root.service !== null
+        onActivated: if (root.service) root.service.playLive()
+      }
+
+      BlockButton {
+        width: root.archive
+          ? (parent.width - Style.space(8) * 2) / 3
+          : (parent.width - Style.space(8)) / 2
         height: root.controlHeight
         label: "Open"
         enabledAction: root.hasShow
-        onActivated: if (root.service) root.service.openCurrentShow()
+        onActivated: if (root.service) root.service.openCurrent()
       }
     }
 
@@ -598,11 +676,15 @@ Item {
         width: parent.width
         spacing: Style.space(4)
 
+        // While an archive plays, the audio really is on this machine
+        // whatever the remembered output says, so the list shows that rather
+        // than the preference. Anything else would point at a speaker that is
+        // silent.
         OutputRow {
           width: parent.width
           label: "This computer"
           detail: root.service && !root.service.mpvAvailable ? "mpv not installed" : ""
-          selected: !root.casting
+          selected: !root.casting || root.archive
           enabledAction: root.service !== null && root.service.mpvAvailable
           onActivated: if (root.service) root.service.castToLocal()
         }
@@ -615,8 +697,12 @@ Item {
 
             width: outputSection.width
             label: modelData.name
-            detail: modelData.model
-            selected: root.casting && root.service && root.service.castUuid === modelData.uuid
+            // A device that is the remembered output but cannot take the
+            // current audio says so, instead of silently looking unselected.
+            detail: root.archive && root.service && root.service.castUuid === modelData.uuid
+              ? "Live radio only" : modelData.model
+            selected: root.casting && !root.archive && root.service
+              && root.service.castUuid === modelData.uuid
             connecting: selected && root.service && !root.service.castConnected
             onActivated: if (root.service) root.service.castTo(modelData.uuid, modelData.name)
           }
@@ -624,8 +710,8 @@ Item {
 
         Caption {
           width: parent.width
-          visible: root.castNote !== ""
-          text: root.castNote
+          visible: root.castNote !== "" || root.archiveCastNote !== ""
+          text: root.castNote !== "" ? root.castNote : root.archiveCastNote
           dim: 0.4
           topPadding: Style.space(3)
         }
@@ -634,7 +720,7 @@ Item {
         // a row, so the panel explains the state rather than losing it.
         OutputRow {
           width: parent.width
-          visible: root.casting && root.castTarget !== ""
+          visible: root.casting && !root.archive && root.castTarget !== ""
             && !Model.hasDevice(root.castDevices, root.service ? root.service.castUuid : "")
           label: root.castTarget
           detail: "Not on this network"
