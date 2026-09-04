@@ -158,6 +158,16 @@ Item {
     }
   }
 
+  // Cards keep a roughly constant size and the grid grows a column instead of
+  // stretching them. Fixed column counts were fine while the window was always
+  // tiled at half a screen; opening maximized turned four columns into 300px
+  // cards with nothing gained.
+  function gridColumns(available, spacing) {
+    var target = 175
+    var columns = Math.round((available + spacing) / (target + spacing))
+    return Math.max(2, Math.min(8, columns))
+  }
+
   // Keep the cursor on screen as it moves. Delegates report their own
   // geometry rather than the page computing it, which is the only thing that
   // works when sections have different row heights.
@@ -396,8 +406,9 @@ Item {
         }
 
         Grid {
+          id: showGrid
           width: parent.width
-          columns: 5
+          columns: root.gridColumns(width, Style.space(12))
           spacing: Style.space(12)
 
           Repeater {
@@ -408,7 +419,7 @@ Item {
               required property int index
               selected: root.cursor === index
               onSelectedChanged: if (selected) root.ensureVisible(this)
-              width: (results.width - Style.space(12) * 4) / 5
+              width: (showGrid.width - Style.space(12) * (showGrid.columns - 1)) / showGrid.columns
               item: modelData
               isShow: true
               service: root.service

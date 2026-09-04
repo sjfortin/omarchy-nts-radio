@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=NTS Radio
+GenericName=Internet Radio
+Comment=Live NTS 1 and 2, the archive, and your saved shows
+Exec=omarchy-shell nts-radio open home
+Icon=nts-radio
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=nts;radio;music;archive;stream;live;
+StartupNotify=false
+Actions=Search;Saved;
+
+[Desktop Action Search]
+Name=Search NTS
+Exec=omarchy-shell nts-radio open search
+
+[Desktop Action Saved]
+Name=Saved shows
+Exec=omarchy-shell nts-radio open saved

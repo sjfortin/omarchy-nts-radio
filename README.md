@@ -114,7 +114,8 @@ opening a different bar panel all leave audio running.
 
 ### The browser window
 
-Open it from `BROWSE` in the panel, or:
+Open it from `BROWSE` in the panel, from the app launcher (see
+[As an app](#as-an-app)), or:
 
 ```bash
 omarchy-shell nts-radio browser
@@ -282,7 +283,10 @@ omarchy-shell nts-radio output local            # play here
 omarchy-shell nts-radio output cast             # play on the remembered device
 omarchy-shell nts-radio output <device-uuid>    # play on a specific device
 
-omarchy-shell nts-radio browser      # open / close the browser window
+omarchy-shell nts-radio browser      # open / close the browser window (toggle)
+omarchy-shell nts-radio open home    # open it without closing it again
+omarchy-shell nts-radio open search  # ... straight onto search
+omarchy-shell nts-radio open saved   # ... or your library
 omarchy-shell nts-radio live         # back to live radio
 omarchy-shell nts-radio live 2       # back to live, on NTS 2
 omarchy-shell nts-radio episode <show-alias> <episode-alias>   # play an archived show
@@ -304,11 +308,45 @@ bindd = SUPER SHIFT, M, NTS channel,    exec, omarchy-shell nts-radio next
 bindd = SUPER SHIFT, B, NTS browser,    exec, omarchy-shell nts-radio browser
 ```
 
+`browser` toggles, which is what a keybinding wants; `open` does not, which is
+what a launcher wants.
+
 The browser can also be opened straight onto a page:
 
 ```bash
 omarchy-shell shell summon sjfortin.nts-radio '{"page":"search"}'
 ```
+
+## As an app
+
+The plugin is a shell plugin, not an application — but the browser window can
+be summoned like one. A desktop entry puts it in the Omarchy menu
+(`SUPER + SPACE`, or `SUPER + ALT + SPACE` for apps) and in any launcher that
+reads XDG desktop entries:
+
+```bash
+~/.config/omarchy/plugins/sjfortin.nts-radio/desktop/install-app.sh
+```
+
+Everything lands under `$HOME` — a `nts-radio.desktop` in
+`~/.local/share/applications` and the icon in `~/.local/share/icons/hicolor`.
+Nothing needs root. Remove it again with `install-app.sh --remove`.
+
+The entry also carries two shortcut actions, which most launchers expose on a
+right-click: **Search NTS** and **Saved shows**, opening the browser straight
+onto that page.
+
+**To have it open maximized**, add this to `~/.config/hypr/hyprland.lua`:
+
+```lua
+o.window({ class = "^org.quickshell$", title = "^NTS$" }, { maximize = true })
+```
+
+Matched on title rather than class because every Omarchy shell surface shares
+`org.quickshell`. This is the same rule the shell's own dev gallery uses. The
+layout adapts to the width it is given — the card grids grow a column rather
+than stretching, so maximized on a wide screen shows more shows rather than
+bigger ones.
 
 ## Settings
 
@@ -384,6 +422,7 @@ Browser.qml        the browser window: routing, keyboard, layout
 NtsMark.qml        the station mark
 pages/             HomePage, SearchPage, SavedPage, ShowPage, EpisodePage
 components/        the shared kit — cards, rows, tracklist, transport, rail
+desktop/           the launcher entry, its icon, and an installer for both
 ```
 
 **One service owns playback.** `Service.qml` is created once by the shell and

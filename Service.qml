@@ -587,9 +587,10 @@ Item {
   // The full browser window. It is an `overlay` entry point on this same
   // plugin, so the shell hands it this very object as `service` — which is
   // what makes playback survive the window opening and closing.
-  function openBrowser() {
+  function openBrowser(page) {
     if (!shell || typeof shell.summon !== "function") return false
-    return shell.summon(pluginId, "{}") === true
+    var payload = { page: String(page || "home") }
+    return shell.summon(pluginId, JSON.stringify(payload)) === true
   }
 
   function toggleBrowser() {
@@ -910,10 +911,23 @@ Item {
     function next(): void { root.setChannel(root.channel === 1 ? 2 : 1) }
 
     // The browser window.
-    //   omarchy-shell nts-radio browser
+    //   omarchy-shell nts-radio browser          (toggle — for a keybinding)
     function browser(): string {
       root.toggleBrowser()
       return "ok"
+    }
+
+    // Open it without closing it again, on a named page. This is what a
+    // launcher wants: a desktop entry that toggled would close the window for
+    // anyone who picked it twice. The page is required rather than optional
+    // because the IPC surface has no notion of a defaulted argument.
+    //   omarchy-shell nts-radio open home
+    //   omarchy-shell nts-radio open search
+    //   omarchy-shell nts-radio open saved
+    function open(page: string): string {
+      var wanted = String(page || "").trim().toLowerCase()
+      if (["home", "search", "saved"].indexOf(wanted) === -1) wanted = "home"
+      return root.openBrowser(wanted) ? wanted : "unavailable"
     }
 
     // Back to live radio from an archived show.

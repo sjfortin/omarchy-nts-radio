@@ -125,6 +125,16 @@ Item {
     else service.toggleSaveEpisode(target.item)
   }
 
+  // Cards keep a roughly constant size and the grid grows a column instead of
+  // stretching them. Fixed column counts were fine while the window was always
+  // tiled at half a screen; opening maximized turned four columns into 300px
+  // cards with nothing gained.
+  function gridColumns(available, spacing) {
+    var target = 175
+    var columns = Math.round((available + spacing) / (target + spacing))
+    return Math.max(2, Math.min(8, columns))
+  }
+
   function ensureVisible(item) {
     if (!item) return
     var pos = item.mapToItem(column, 0, 0)
@@ -338,8 +348,9 @@ Item {
         }
 
         Grid {
+          id: savedGrid
           width: parent.width
-          columns: 6
+          columns: root.gridColumns(width, Style.space(12))
           spacing: Style.space(12)
 
           Repeater {
@@ -350,7 +361,7 @@ Item {
               required property int index
               selected: root.cursor === root.savedOffset + index
               onSelectedChanged: if (selected) root.ensureVisible(this)
-              width: (column.width - Style.space(12) * 5) / 6
+              width: (savedGrid.width - Style.space(12) * (savedGrid.columns - 1)) / savedGrid.columns
               item: modelData
               isShow: true
               service: root.service
@@ -385,8 +396,9 @@ Item {
         }
 
         Grid {
+          id: picksGrid
           width: parent.width
-          columns: 4
+          columns: root.gridColumns(width, Style.space(14))
           spacing: Style.space(14)
           visible: root.picks.length > 0
 
@@ -398,7 +410,7 @@ Item {
               required property int index
               selected: root.cursor === root.picksOffset + index
               onSelectedChanged: if (selected) root.ensureVisible(this)
-              width: (column.width - Style.space(14) * 3) / 4
+              width: (picksGrid.width - Style.space(14) * (picksGrid.columns - 1)) / picksGrid.columns
               item: modelData
               service: root.service
               active: root.active

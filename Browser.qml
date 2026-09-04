@@ -32,8 +32,20 @@ Item {
 
   function open(payloadJson) {
     closingFromHost = false
+    var wasOpen = opened
     opened = true
     window.visible = true
+
+    // Summoning a window that is already up should bring it to the front, not
+    // silently do nothing — a launcher entry picked twice must not feel dead.
+    // Re-mapping is the only lever a FloatingWindow gives us for that, and the
+    // compositor focuses the window as it comes back.
+    if (wasOpen) {
+      closingFromHost = true
+      window.visible = false
+      window.visible = true
+      closingFromHost = false
+    }
     // A payload can name a destination, so a keybinding can open the browser
     // straight onto search:
     //   omarchy-shell shell summon sjfortin.nts-radio '{"page":"search"}'

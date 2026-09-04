@@ -73,6 +73,16 @@ Item {
 
   onTabChanged: cursor = -1
 
+  // Cards keep a roughly constant size and the grid grows a column instead of
+  // stretching them. Fixed column counts were fine while the window was always
+  // tiled at half a screen; opening maximized turned four columns into 300px
+  // cards with nothing gained.
+  function gridColumns(available, spacing) {
+    var target = 175
+    var columns = Math.round((available + spacing) / (target + spacing))
+    return Math.max(2, Math.min(8, columns))
+  }
+
   function ensureVisible(item) {
     if (!item) return
     var pos = item.mapToItem(content, 0, 0)
@@ -169,8 +179,9 @@ Item {
       }
 
       Grid {
+        id: savedShowGrid
         width: parent.width
-        columns: 5
+        columns: root.gridColumns(width, Style.space(12))
         spacing: Style.space(12)
         visible: root.tab === "shows" && root.shows.length > 0
 
@@ -182,7 +193,7 @@ Item {
             required property int index
             selected: root.cursor === index
             onSelectedChanged: if (selected) root.ensureVisible(this)
-            width: (content.width - Style.space(12) * 4) / 5
+            width: (savedShowGrid.width - Style.space(12) * (savedShowGrid.columns - 1)) / savedShowGrid.columns
             item: modelData
             isShow: true
             service: root.service
