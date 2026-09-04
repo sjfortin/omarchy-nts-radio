@@ -147,13 +147,11 @@ Item {
         bottom - scroller.height)
   }
 
-  Flickable {
+  Nts.Scroller {
     id: scroller
     anchors.fill: parent
     contentWidth: width
     contentHeight: column.implicitHeight + Style.space(32)
-    clip: true
-    boundsBehavior: Flickable.StopAtBounds
 
     Column {
       id: column

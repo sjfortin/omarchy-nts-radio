@@ -145,7 +145,7 @@ Item {
     Nts.Rule { ink: root.ink }
   }
 
-  Flickable {
+  Nts.Scroller {
     id: scroller
     anchors.top: header.bottom
     anchors.topMargin: Style.space(14)
@@ -154,8 +154,6 @@ Item {
     anchors.bottom: parent.bottom
     contentWidth: width
     contentHeight: content.implicitHeight + Style.space(32)
-    clip: true
-    boundsBehavior: Flickable.StopAtBounds
 
     Column {
       id: content
