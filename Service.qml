@@ -219,6 +219,64 @@ Item {
     onTriggered: root.refresh()
   }
 
+  // The schedule chain is one non-repeating timer, re-armed by the fetch
+  // process exiting. That is efficient and it is also its weakness: anything
+  // that stops the exit arriving — a subprocess killed while the machine
+  // suspends, a connection that dies with the wifi — leaves `fetching` stuck
+  // true, and every later refresh() returns early on it. The chain then never
+  // restarts and the bar shows a schedule from before the sleep, indefinitely.
+  //
+  // curl is bounded at 12 seconds, so anything still "in flight" well past
+  // that is not coming back.
+  Timer {
+    id: fetchWatchdog
+    interval: 30000
+    repeat: true
+    running: root.fetching
+    onTriggered: {
+      if (!root.fetching) return
+      root.fetching = false
+      liveFetch.running = false
+      root.scheduleNextRefresh()
+    }
+  }
+
+  // Waking from suspend.
+  //
+  // Qt timers run on a monotonic clock that does not advance while the machine
+  // is asleep, so a refresh scheduled for a minute's time is still a minute
+  // away after a three-hour lid-close — and until it lands, the bar and the
+  // browser describe a broadcast that finished hours ago. Meanwhile a cast
+  // device has carried on playing the live stream the whole time, which is
+  // exactly the mismatch this shows up as: the speaker is on the right show
+  // and the UI is not.
+  //
+  // There is no resume signal to subscribe to from here, but a tick that took
+  // far longer than its own interval is the same evidence: the process was not
+  // running for a while, so whatever is on screen is old.
+  property double lastTickMs: Date.now()
+
+  Timer {
+    id: wakeWatch
+    interval: 60000
+    repeat: true
+    running: true
+    onTriggered: {
+      var now = Date.now()
+      var elapsed = now - root.lastTickMs
+      root.lastTickMs = now
+      if (elapsed < interval * 2.5) return
+
+      // A fetch that was in flight when the machine slept will never report
+      // back, and would otherwise block the refresh below.
+      if (root.fetching) {
+        root.fetching = false
+        liveFetch.running = false
+      }
+      root.refresh()
+    }
+  }
+
   // Fetching a fresh schedule the moment a panel opens or playback starts is
   // the difference between "instant" and "up to a minute stale".
   onUiActiveChanged: if (uiActive) refreshIfStale()
@@ -1065,6 +1123,9 @@ Item {
           continueListening: root.library.resume.length
         },
         browserOpen: root.browserOpen,
+        scheduleAgeSec: root.lastGoodFetchMs > 0
+          ? Math.round((Date.now() - root.lastGoodFetchMs) / 1000) : -1,
+        fetching: root.fetching,
         scroll: {
           speed: root.scrollSpeed,
           events: root.wheelEventCount,

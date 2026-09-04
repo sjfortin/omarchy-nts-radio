@@ -415,6 +415,15 @@ of SoundCloud and Mixcloud first.
 Offline, the browser still opens, live-schedule data stays on screen, and your
 saved library reads normally, because it is a local file.
 
+**Waking up.** Qt timers run on a monotonic clock that does not advance while
+the machine is asleep, so after a lid-close the next scheduled refresh is still
+however long it had left — and until it lands, the bar describes a broadcast
+that finished hours ago. A cast device, meanwhile, has been playing the live
+stream the whole time, so the speaker is on the right show and the interface is
+not. The plugin notices a tick that took far longer than its own interval,
+treats that as a resume, and refreshes immediately. A fetch that was in flight
+when the machine slept is abandoned rather than left blocking the next one.
+
 **Resources.** mpv exists only while playing, and is stopped five minutes after
 you pause — an archived show remembers its position first, so pressing play
 picks it up where you left it. The cast bridge is a Python process that runs
