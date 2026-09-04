@@ -47,8 +47,14 @@ Item {
 
   // Where audio goes: "local" (mpv on this machine) or "cast" (a Chromecast
   // device fetches the stream itself). The chosen device is remembered by
-  // uuid so it can be reconnected without the user picking it again.
+  // uuid so it can be reconnected without the user picking it again — but the
+  // *mode* always starts local; see adoptSettings.
   property string outputMode: "local"
+
+  // What shell.json says the last session was doing. Only used to decide
+  // whether to ask a remembered device if it is still playing, never to set
+  // the current output.
+  property string lastSessionOutput: "local"
   property string castUuid: ""
   property string castName: ""
   readonly property bool casting: outputMode === "cast"
@@ -78,10 +84,19 @@ Item {
     settingsAdopted = true
     applySettings(values)
 
-    // Only now is it known which device the last session used. A cast
-    // outlives this process, so before deciding we are stopped, ask the
-    // device whether it is still playing one of our streams.
-    if (casting && castUuid !== "") caster.adoptExistingSession()
+    // Radio starts on this computer, always. A remembered device is a
+    // convenience for switching back to it in one click — not an instruction
+    // to start playing there, which is a surprising thing for a shell restart
+    // to do to a speaker in another room.
+    outputMode = "local"
+
+    // The one exception, and it is not a preference: a cast outlives this
+    // process, so if the last session ended while casting, the device may be
+    // playing one of our streams right now. Ask it. If it is, the audio is
+    // already happening and we take the output back so the panel can stop it
+    // — abandoning it would leave a speaker playing with nothing to control
+    // it. If it is not, we stay local and nothing has started.
+    if (lastSessionOutput === "cast" && castUuid !== "") caster.adoptExistingSession()
   }
 
   // Live edits from the bar's own settings form land here too, so changing
@@ -109,7 +124,10 @@ Item {
       caster.targetUuid = castUuid
       caster.targetName = castName
     }
-    if (values.output !== undefined) outputMode = Model.outputModeFromSetting(values.output)
+    // Deliberately not applied to outputMode. What shell.json records is what
+    // the *last* session was doing, which adoptSettings uses to decide whether
+    // a cast is worth asking about — it is not a starting output.
+    if (values.output !== undefined) lastSessionOutput = Model.outputModeFromSetting(values.output)
     player.volume = volume
     caster.volume = volume
     applyingSettings = false
@@ -687,7 +705,26 @@ Item {
 
     // Casting keeps the schedule refreshing at the fast cadence the same way
     // local playback does.
-    function onWantedChanged() { root.scheduleNextRefresh() }
+    function onWantedChanged() {
+      // The caster only wants audio for two reasons: we asked it to (in which
+      // case the output is already cast), or it adopted a session that was
+      // still running on the device from before this shell started. The second
+      // is the only way the output moves without the user touching anything,
+      // and it moves because the speaker is already playing.
+      if (caster.wanted && !root.casting) root.outputMode = "cast"
+      root.scheduleNextRefresh()
+    }
+
+    // The recovery probe has finished. If it found nothing to take back, say
+    // so in shell.json: without this, a session that once ended while casting
+    // would start a discovery on every shell restart forever, asking a
+    // question that was already answered.
+    function onAdoptingChanged() {
+      if (caster.adopting) return
+      if (root.casting || root.lastSessionOutput !== "cast") return
+      root.lastSessionOutput = "local"
+      root.requestPersist()
+    }
 
     // Remember a device the moment it is actually connected, name included,
     // so the next session can reconnect without a discovery round trip.

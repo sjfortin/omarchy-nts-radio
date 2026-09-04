@@ -205,11 +205,19 @@ NTS mobile app, and favourites you already have there do not appear here.
 
 ### Casting
 
+**Radio starts on this computer.** Casting is always a deliberate choice: the
+plugin never begins a session by playing on a speaker in another room, however
+you left it last time.
+
 The `OUTPUT` section of the panel lists *This computer* plus any
 Chromecast-protocol device on your network — Chromecast, Chromecast Audio,
 Google Home, Nest speakers and displays. Pick one and the audio moves; pick
 *This computer* and it comes back. If something was playing, it keeps playing
 across the move.
+
+Your chosen device is remembered so switching to it is one click with no
+discovery wait — but the *output* is not restored, only the device. Every
+session starts local.
 
 Casting is not "route this laptop's audio elsewhere". The device fetches the
 NTS stream itself, so nothing is decoded or re-encoded here and **your laptop
@@ -234,15 +242,15 @@ The device shows the programme that was on air when casting started. Refreshing
 that would mean reloading the stream on the device, and a gap in the audio
 every time a show changes is worse than a stale title.
 
-Your chosen device is remembered between sessions and reconnected
-automatically when it is back on the network.
-
-Because the device is doing the playing, a cast survives this shell. If
-Omarchy restarts — a crash, `omarchy restart shell`, a plugin reload — while
-you are casting, the radio keeps going, and the plugin reconnects and picks
-the session back up so the panel shows it playing and can stop it. It only
-adopts a session that is playing an NTS stream it recognizes, so it will never
-take over someone else's music on the same speaker.
+There is one exception to "always starts local", and it is not a preference
+being restored — it is audio that is already happening. Because the device does
+the playing, a cast can outlive this shell: if Omarchy dies while you are
+casting, the speaker keeps going with nothing controlling it. So when the last
+session ended while casting, the plugin asks that device once whether it is
+still playing one of our streams. If it is, it takes the session back so the
+panel can show it and stop it; if it is not, playback stays local and nothing
+starts. It only ever adopts a stream it recognizes, so it will never take over
+someone else's music on the same speaker.
 
 ### Media keys
 
@@ -308,7 +316,7 @@ Under **Setup → Plugins → NTS Radio**, or as keys on the widget's entry in
 | `maxBarTextWidth` | `160` | Pixel cap on that title. `0` hides it. |
 | `volume` | `70` | Stream volume, remembered between sessions. |
 | `refreshMinutes` | `1` | Minutes between schedule refreshes while a panel or the browser is open, or audio is playing. |
-| `output` | `local` | `local` or `cast`. Set by picking an output in the panel. |
+| `output` | `local` | Records what the last session was doing. Not restored as a starting output — radio always starts on this computer; it is only used to decide whether to ask a remembered device if it is still playing. |
 | `castDevice` | — | UUID of the remembered cast device. |
 | `castDeviceName` | — | Its friendly name, so the panel can name it before discovery finishes. |
 
