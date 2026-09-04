@@ -336,17 +336,25 @@ The entry also carries two shortcut actions, which most launchers expose on a
 right-click: **Search NTS** and **Saved shows**, opening the browser straight
 onto that page.
 
-**To have it open maximized**, add this to `~/.config/hypr/hyprland.lua`:
+**It is an ordinary window.** Not a layer-shell overlay, not a dropdown that
+floats above everything: a real XDG toplevel, so it tiles with your other
+windows, moves between workspaces, and answers every window binding you already
+have. Nothing about it is special-cased in the compositor.
+
+The layout adapts to whatever width it is given — the card grids grow a column
+rather than stretching, so a wide window shows more shows rather than bigger
+ones.
+
+If you would rather it *always* opened maximized, that is a window rule you can
+add to `~/.config/hypr/hyprland.lua` — but it is opt-in, and it does mean the
+window stops tiling normally:
 
 ```lua
 o.window({ class = "^org.quickshell$", title = "^NTS$" }, { maximize = true })
 ```
 
-Matched on title rather than class because every Omarchy shell surface shares
-`org.quickshell`. This is the same rule the shell's own dev gallery uses. The
-layout adapts to the width it is given — the card grids grow a column rather
-than stretching, so maximized on a wide screen shows more shows rather than
-bigger ones.
+Matched on title rather than class, because every Omarchy shell surface shares
+`org.quickshell`.
 
 ## Settings
 

@@ -55,5 +55,5 @@ echo "  $icon_svg"
 echo
 echo "Find it as \"NTS Radio\" in the Omarchy menu (SUPER + SPACE)."
 echo
-echo "To have it open maximized, add this to ~/.config/hypr/hyprland.lua:"
-echo '  o.window({ class = "^org.quickshell$", title = "^NTS$" }, { maximize = true })'
+echo "It opens as an ordinary tiled window — it moves between workspaces and"
+echo "answers your window bindings like anything else."
