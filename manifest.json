@@ -34,7 +34,8 @@
       "showTitleInBar": "When playing",
       "maxBarTextWidth": 160,
       "volume": 70,
-      "refreshMinutes": 1
+      "refreshMinutes": 1,
+      "scrollSpeed": 100
     },
     "schema": [
       {
@@ -89,6 +90,16 @@
         "step": 1,
         "defaultValue": 1,
         "description": "Minutes between now-playing refreshes while the panel is open or a stream is playing. Idle refreshes are much rarer."
+      },
+      {
+        "key": "scrollSpeed",
+        "type": "integer",
+        "label": "Scroll speed",
+        "min": 25,
+        "max": 400,
+        "step": 25,
+        "defaultValue": 100,
+        "description": "How far a swipe or a wheel notch scrolls in the browser window, as a percentage. Raise it if scrolling feels heavy on a trackpad."
       }
     ]
   }

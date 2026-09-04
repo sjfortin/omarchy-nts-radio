@@ -43,6 +43,12 @@ Item {
   property int channel: 1
   property int volume: 70
   property int refreshMinutes: 1
+
+  // Scroll distance in the browser window, as a percentage. Lives here rather
+  // than in the browser because the browser is destroyed on close and this has
+  // to survive that, and because the bar widget owns the shell.json entry.
+  property int scrollSpeed: 100
+
   property bool settingsAdopted: false
 
   // Where audio goes: "local" (mpv on this machine) or "cast" (a Chromecast
@@ -79,7 +85,8 @@ Item {
   function adoptSettings(values) {
     if (settingsAdopted || !values) return
     if (values.channel === undefined && values.volume === undefined
-      && values.refreshMinutes === undefined && values.output === undefined) return
+      && values.refreshMinutes === undefined && values.output === undefined
+      && values.scrollSpeed === undefined) return
 
     settingsAdopted = true
     applySettings(values)
@@ -118,6 +125,8 @@ Item {
     }
     if (values.refreshMinutes !== undefined)
       refreshMinutes = Math.max(1, Math.min(30, Math.floor(Number(values.refreshMinutes)) || 1))
+    if (values.scrollSpeed !== undefined)
+      scrollSpeed = Math.max(25, Math.min(400, Math.floor(Number(values.scrollSpeed)) || 100))
     if (values.castDevice !== undefined) {
       castUuid = Model.plainText(values.castDevice, 80)
       castName = Model.plainText(values.castDeviceName, 60)
@@ -138,6 +147,7 @@ Item {
     return {
       channel: Model.channelSettingValue(channel),
       volume: Model.clampVolume(volume),
+      scrollSpeed: scrollSpeed,
       output: outputMode,
       castDevice: castUuid,
       castDeviceName: castName
@@ -581,6 +591,22 @@ Item {
   }
 
   onNowChanged: pushMprisTitle()
+
+  // ------------------------------------------------------------ scroll debug
+
+  // The last wheel deltas the browser saw. Scroll feel has to be judged on the
+  // machine it runs on, and a mouse and a touchpad are only told apart by which
+  // of these is non-zero — so rather than guess, the numbers are recorded here
+  // and printed by `nts-radio status`.
+  property real lastWheelPixelDelta: 0
+  property real lastWheelAngleDelta: 0
+  property int wheelEventCount: 0
+
+  function noteWheel(pixelDelta, angleDelta) {
+    lastWheelPixelDelta = pixelDelta
+    lastWheelAngleDelta = angleDelta
+    wheelEventCount++
+  }
 
   // ---------------------------------------------------------------- browser
 
@@ -1035,6 +1061,12 @@ Item {
           continueListening: root.library.resume.length
         },
         browserOpen: root.browserOpen,
+        scroll: {
+          speed: root.scrollSpeed,
+          events: root.wheelEventCount,
+          lastPixelDelta: root.lastWheelPixelDelta,
+          lastAngleDelta: root.lastWheelAngleDelta
+        },
         ytdlAvailable: root.ytdlAvailable,
         archiveError: root.archiveError,
         castDevice: root.castTargetName,

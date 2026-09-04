@@ -368,6 +368,7 @@ Under **Setup → Plugins → NTS Radio**, or as keys on the widget's entry in
 | `maxBarTextWidth` | `160` | Pixel cap on that title. `0` hides it. |
 | `volume` | `70` | Stream volume, remembered between sessions. |
 | `refreshMinutes` | `1` | Minutes between schedule refreshes while a panel or the browser is open, or audio is playing. |
+| `scrollSpeed` | `100` | How far a swipe or a wheel notch scrolls in the browser, as a percentage. Raise it if scrolling feels heavy; it applies immediately. |
 | `output` | `local` | Records what the last session was doing. Not restored as a starting output — radio always starts on this computer; it is only used to decide whether to ask a remembered device if it is still playing. |
 | `castDevice` | — | UUID of the remembered cast device. |
 | `castDeviceName` | — | Its friendly name, so the panel can name it before discovery finishes. |

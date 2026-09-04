@@ -149,6 +149,10 @@ Item {
 
   Nts.Scroller {
     id: scroller
+    speedPercent: root.service ? root.service.scrollSpeed : 100
+    onWheelObserved: function(pixelDelta, angleDelta) {
+      if (root.service) root.service.noteWheel(pixelDelta, angleDelta)
+    }
     anchors.fill: parent
     contentWidth: width
     contentHeight: column.implicitHeight + Style.space(32)
