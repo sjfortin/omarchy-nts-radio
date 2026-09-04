@@ -20,7 +20,7 @@ same player as live radio, so moving between them is one click and closing the
 window never interrupts anything.
 
 Audio plays locally through **mpv** and PipeWire, or on a Chromecast device that
-fetches the live stream itself. There is no embedded browser and no background
+fetches the stream itself — live radio and archived shows alike. There is no embedded browser and no background
 daemon — mpv runs only while something is playing, and it exposes MPRIS, so
 media keys and any other desktop media client control it like any other player.
 
@@ -30,9 +30,9 @@ media keys and any other desktop media client control it like any other player.
 |------------|----------|--------------|
 | `mpv` | for playback | plays live streams and archived episodes on this machine |
 | `curl` | yes | fetches the schedule and everything in the browser (already present on Omarchy) |
-| `yt-dlp` | for the archive | resolves archived episodes, which NTS hosts on SoundCloud / Mixcloud |
+| `yt-dlp` | for the archive | resolves archived episodes, which NTS hosts on SoundCloud / Mixcloud — needed for playing them here *and* for casting them |
 | `mpv-mpris` | optional | media-key and MPRIS control |
-| `python-pychromecast` | optional | casting live radio to Chromecast / Google Home / Nest devices |
+| `python-pychromecast` | optional | casting to Chromecast / Google Home / Nest devices |
 
 On Arch / Omarchy:
 
@@ -224,11 +224,15 @@ NTS stream itself, so nothing is decoded or re-encoded here and **your laptop
 can sleep without interrupting the radio**. The plugin keeps a control
 connection only to start, stop, set volume, and report status.
 
-**Casting is live radio only.** An archived episode has no URL a Chromecast
-could fetch — it has to be resolved on this machine first — so archived shows
-always play locally, whatever output is selected. The panel says so, and your
-device choice is remembered and takes effect again the moment live radio is
-back on.
+**Archived shows cast too**, and they stay seekable on the device — scrub,
+pause and resume all work, and the position carries across if you move an
+episode between the speaker and this computer mid-play.
+
+A device cannot resolve a SoundCloud page on its own, so for casting the
+episode is turned into a plain audio URL here first and the device fetches
+that. It takes a second or two, which is the pause you see before an archived
+show starts on a speaker. A small number of episodes only publish formats no
+Chromecast can decode; those fall back to playing here and the panel says so.
 
 Two more consequences worth knowing:
 
@@ -237,6 +241,8 @@ Two more consequences worth knowing:
 - Media keys and MPRIS apply to local playback only. A cast session is running
   on the device, not on this machine, so there is no local player for them to
   talk to.
+- Live radio is sent to the device as a LIVE stream, so it shows no scrub bar;
+  an archived show is sent as a finite recording, so it does.
 
 The device shows the programme that was on air when casting started. Refreshing
 that would mean reloading the stream on the device, and a gap in the audio
@@ -367,6 +373,7 @@ Player.qml         the mpv child process and its JSON IPC socket
 Caster.qml         playback on a Chromecast device, and device discovery
 Api.qml            the API client: queue, concurrency, retries, cache
 Fetcher.qml        one HTTP GET, in a subprocess
+Resolver.qml       turns an episode page into a URL a cast device can fetch
 Model.js           live schedule endpoints, parsing and sanitization
 NtsApi.js          archive endpoints: search, shows, episodes, tracklists
 Library.js         the local library: saved shows, episodes, resume positions
@@ -413,7 +420,10 @@ those are the files to change.
   matches".
 - **Episode audio is not NTS-hosted**, so archived playback depends on `yt-dlp`
   and on the SoundCloud/Mixcloud upload still existing. Some broadcasts were
-  never uploaded; those episodes are listed with *No audio*.
+  never uploaded; those episodes are listed with *No audio*. Casting one needs
+  a *progressive* format rather than HLS or DASH — a Chromecast handed a
+  manifest URL sits at IDLE and never reports an error — so the resolver asks
+  for `protocol=https|http` specifically.
 - **Tracklist timestamps are partly estimated** — see above.
 - **There is no host resource.** NTS models a host as a show: the site's own
   host links point at `/shows/{alias}`, which carries the presenter's image,

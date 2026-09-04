@@ -12,7 +12,11 @@ and report on that session.
 Commands in (one JSON object per line):
     {"cmd": "discover", "timeout": 6}
     {"cmd": "connect",  "uuid": "..."}
-    {"cmd": "play",     "url": "...", "title": "...", "artwork": "...", "subtitle": "..."}
+    {"cmd": "play",     "url": "...", "title": "...", "artwork": "...", "subtitle": "...",
+                        "live": true, "start": 0, "type": "audio/mpeg"}
+    {"cmd": "seek",     "position": 0}
+    {"cmd": "pause"}
+    {"cmd": "resume"}
     {"cmd": "stop"}
     {"cmd": "volume",   "level": 0-100}
     {"cmd": "quit"}
@@ -60,6 +64,17 @@ def emit(**payload):
     with _write_lock:
         sys.stdout.write(line + "\n")
         sys.stdout.flush()
+
+
+def _seconds(value):
+    """A finite, sane number of seconds, or 0."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number or number < 0 or number > 86400:
+        return 0.0
+    return round(number, 1)
 
 
 def volume_to_percent(level):
@@ -195,7 +210,8 @@ class Bridge(CastStatusListener, MediaStatusListener):
 
     # ------------------------------------------------------------- playback
 
-    def play(self, url, title="", subtitle="", artwork=""):
+    def play(self, url, title="", subtitle="", artwork="", live=True, start=0,
+             content_type="audio/mpeg"):
         if self.cast is None:
             emit(event="error", message="not connected to a device")
             return
@@ -204,20 +220,71 @@ class Bridge(CastStatusListener, MediaStatusListener):
             return
 
         metadata = {"metadataType": 3, "title": clean(title), "artist": clean(subtitle)}
+
+        # LIVE tells the device there is no seekable timeline, which is what
+        # stops it presenting a scrub bar for a radio stream. An archived show
+        # is the opposite: a finite recording the device can seek within, so it
+        # is sent as BUFFERED and may start part-way in.
+        stream_type = "LIVE" if live else "BUFFERED"
+        try:
+            offset = max(0.0, float(start))
+        except (TypeError, ValueError):
+            offset = 0.0
+
+        # NTS's live relay is MP3; archived episodes resolve to whatever the
+        # host published — MP3 on SoundCloud, MP4/AAC on Mixcloud — so the type
+        # comes from the resolver rather than being assumed.
+        wanted_type = clean(content_type, 40) or "audio/mpeg"
+        if not wanted_type.startswith("audio/"):
+            wanted_type = "audio/mpeg"
+
         try:
             self.cast.media_controller.play_media(
                 str(url),
-                content_type="audio/mpeg",
+                content_type=wanted_type,
                 title=clean(title) or "NTS Radio",
                 thumb=clean(artwork, 600) or None,
-                # LIVE tells the device there is no seekable timeline, which is
-                # what stops it presenting a scrub bar for a radio stream.
-                stream_type="LIVE",
+                stream_type=stream_type,
+                current_time=offset if (not live and offset > 0) else None,
                 metadata=metadata,
             )
             self.cast.media_controller.block_until_active(timeout=12)
         except Exception as exc:
             emit(event="error", message="could not start playback: {}".format(exc))
+
+    def seek(self, position):
+        """Jump to a point in an archived show.
+
+        Meaningless for live radio, where the device has no timeline; the
+        caller only sends this for BUFFERED media.
+        """
+        if self.cast is None:
+            return
+        try:
+            self.cast.media_controller.seek(max(0.0, float(position)))
+        except Exception as exc:
+            emit(event="error", message="could not seek: {}".format(exc))
+
+    def pause(self):
+        """Hold an archived show where it is.
+
+        Only sent for BUFFERED media. Pausing live radio is meaningless — there
+        is nothing to come back to — so the caller stops it instead.
+        """
+        if self.cast is None:
+            return
+        try:
+            self.cast.media_controller.pause()
+        except Exception as exc:
+            emit(event="error", message="could not pause: {}".format(exc))
+
+    def resume(self):
+        if self.cast is None:
+            return
+        try:
+            self.cast.media_controller.play()
+        except Exception as exc:
+            emit(event="error", message="could not resume: {}".format(exc))
 
     def stop(self):
         """Stop the stream and hand the device back.
@@ -253,8 +320,16 @@ class Bridge(CastStatusListener, MediaStatusListener):
     def _emit_status(self, state=None, volume_level=None):
         cast = self.cast
         content = ""
+        position = 0.0
+        duration = 0.0
         if cast is not None:
-            content = clean(getattr(cast.media_controller.status, "content_id", ""), 400)
+            status = cast.media_controller.status
+            content = clean(getattr(status, "content_id", ""), 400)
+            # Both are None for live radio and for a session that has not
+            # loaded yet; 0 reads the same to the UI as "no timeline".
+            position = _seconds(getattr(status, "adjusted_current_time", None)
+                                or getattr(status, "current_time", None))
+            duration = _seconds(getattr(status, "duration", None))
         if volume_level is None:
             volume_level = cast.status.volume_level if cast and cast.status else 0
         emit(
@@ -263,6 +338,8 @@ class Bridge(CastStatusListener, MediaStatusListener):
             volume=volume_to_percent(volume_level),
             connected=cast is not None,
             content=content,
+            position=position,
+            duration=duration,
         )
 
     def new_cast_status(self, status):
@@ -322,7 +399,16 @@ def main():
                         message.get("title", ""),
                         message.get("subtitle", ""),
                         message.get("artwork", ""),
+                        message.get("live", True),
+                        message.get("start", 0),
+                        message.get("type", "audio/mpeg"),
                     )
+                elif command == "seek":
+                    bridge.seek(message.get("position", 0))
+                elif command == "pause":
+                    bridge.pause()
+                elif command == "resume":
+                    bridge.resume()
                 elif command == "stop":
                     bridge.stop()
                 elif command == "volume":

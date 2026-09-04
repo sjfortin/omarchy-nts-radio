@@ -101,11 +101,11 @@ Item {
     return ""
   }
 
-  // Archived episodes are resolved on this machine before they can be played,
-  // so there is no URL a Chromecast could fetch for itself. The output choice
-  // is kept and takes effect again on live radio.
-  readonly property string archiveCastNote: archive && casting
-    ? "Archived shows play on this computer" : ""
+  // Archived shows cast like live radio, but not every episode resolves to a
+  // format a device can decode. When one does not, the audio stays here and
+  // this says so rather than leaving a silent speaker selected.
+  readonly property string archiveCastNote: archive && casting && service && service.archiveIsLocal
+    ? "This episode cannot be cast — playing here" : ""
 
   readonly property bool casting: service ? service.casting : false
   readonly property var castDevices: service ? service.castDevices : []
@@ -676,15 +676,13 @@ Item {
         width: parent.width
         spacing: Style.space(4)
 
-        // While an archive plays, the audio really is on this machine
-        // whatever the remembered output says, so the list shows that rather
-        // than the preference. Anything else would point at a speaker that is
-        // silent.
+        // Selection follows where the audio actually is, which is the chosen
+        // output except when an episode could not be cast and fell back here.
         OutputRow {
           width: parent.width
           label: "This computer"
           detail: root.service && !root.service.mpvAvailable ? "mpv not installed" : ""
-          selected: !root.casting || root.archive
+          selected: root.service ? !root.service.castingAudio : true
           enabledAction: root.service !== null && root.service.mpvAvailable
           onActivated: if (root.service) root.service.castToLocal()
         }
@@ -697,11 +695,12 @@ Item {
 
             width: outputSection.width
             label: modelData.name
-            // A device that is the remembered output but cannot take the
-            // current audio says so, instead of silently looking unselected.
-            detail: root.archive && root.service && root.service.castUuid === modelData.uuid
-              ? "Live radio only" : modelData.model
-            selected: root.casting && !root.archive && root.service
+            // A device that is the chosen output but could not take this
+            // particular episode says so, instead of silently looking unselected.
+            detail: root.archiveCastNote !== "" && root.service
+              && root.service.castUuid === modelData.uuid
+              ? "Cannot play this episode" : modelData.model
+            selected: root.service && root.service.castingAudio
               && root.service.castUuid === modelData.uuid
             connecting: selected && root.service && !root.service.castConnected
             onActivated: if (root.service) root.service.castTo(modelData.uuid, modelData.name)
@@ -720,7 +719,7 @@ Item {
         // a row, so the panel explains the state rather than losing it.
         OutputRow {
           width: parent.width
-          visible: root.casting && !root.archive && root.castTarget !== ""
+          visible: root.casting && root.castTarget !== ""
             && !Model.hasDevice(root.castDevices, root.service ? root.service.castUuid : "")
           label: root.castTarget
           detail: "Not on this network"

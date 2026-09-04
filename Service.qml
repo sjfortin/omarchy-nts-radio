@@ -264,23 +264,35 @@ Item {
   property var archiveEpisode: null
   readonly property bool hasArchiveEpisode: archiveEpisode !== null && archiveEpisode.valid === true
 
-  // Casting is a live-radio capability. A Chromecast fetches the stream URL
-  // itself, and an archived episode has no such URL — only a SoundCloud page
-  // that has to be resolved on this machine first. Archives therefore always
-  // play locally, whatever output is selected; the choice is remembered and
-  // takes effect again the moment live radio comes back.
-  readonly property bool castingAudio: casting && !archiveMode
+  // Archived shows cast too. The device cannot resolve a SoundCloud page on
+  // its own, so Resolver.qml turns the episode into a progressive audio URL
+  // here first and the device fetches that — the same arrangement as live
+  // radio, one step further back.
+  //
+  // Not every episode yields a castable format. When resolution comes back
+  // with nothing a device could play, that episode falls back to local
+  // playback and says so, and this is how the rest of the service knows which
+  // backend actually holds the audio.
+  property bool archiveIsLocal: false
+  readonly property bool castingAudio: casting && !(archiveMode && archiveIsLocal)
+
+  // Turning an episode page into something a device can fetch takes a
+  // subprocess and a second or two, during which nothing is playing yet.
+  property bool resolvingCast: false
 
   // Every playback question routes to whichever backend owns the audio, so
   // the widget and panel never have to know which one that is.
   readonly property bool playing: castingAudio ? caster.playing : player.playing
-  readonly property bool loading: castingAudio ? caster.loading : player.loading
+  readonly property bool loading: resolvingCast
+    || (castingAudio ? caster.loading : player.loading)
   readonly property bool stopped: !playing && !loading
   readonly property string playbackError: castingAudio ? caster.lastError : player.lastError
 
   // Position and length, in seconds. Both are 0 for live, which has neither.
-  readonly property real positionSec: archiveMode ? player.positionSec : 0
-  readonly property real durationSec: archiveMode ? player.durationSec : 0
+  readonly property real positionSec: !archiveMode ? 0
+    : (castingAudio ? caster.positionSec : player.positionSec)
+  readonly property real durationSec: !archiveMode ? 0
+    : (castingAudio ? caster.durationSec : player.durationSec)
   readonly property bool canSeek: archiveMode && durationSec > 0
 
   // Local playback needs mpv; casting needs python-pychromecast. Neither is
@@ -296,8 +308,10 @@ Item {
 
   function play() {
     if (archiveMode) {
-      // The episode is already loaded into the player; this is a resume.
-      player.play()
+      // The episode is already loaded; this is a resume, and it belongs to
+      // whichever backend is holding it.
+      if (castingAudio) caster.resume()
+      else player.play()
       return
     }
     if (castingAudio) {
@@ -313,8 +327,11 @@ Item {
   function pause() {
     if (archiveMode) {
       // Note where it stopped before the process can be reaped, so the shelf
-      // is right even if the user never comes back to it this session.
-      player.pause()
+      // is right even if the user never comes back to it this session. An
+      // archive on a device genuinely pauses rather than stopping — unlike
+      // live radio, there is a place to come back to.
+      if (castingAudio) caster.pause()
+      else player.pause()
       saveProgress()
       return
     }
@@ -347,10 +364,6 @@ Item {
 
     archiveError = ""
 
-    // Whatever was playing is losing the audio. A cast device keeps playing
-    // the live stream on its own if it is not told to stop.
-    if (caster.wanted) caster.stop()
-
     // Leaving one episode for another: record where we got to in the old one
     // before its position is overwritten.
     if (archiveMode && hasArchiveEpisode && !NtsApi.sameEpisode(archiveEpisode, episode))
@@ -361,10 +374,55 @@ Item {
 
     archiveEpisode = episode
     playbackMode = "archive"
+    // Assume the chosen output until resolution says otherwise.
+    archiveIsLocal = !casting
     player.mediaTitle = archiveMprisTitle(episode)
+
+    if (casting) {
+      // The device cannot resolve a SoundCloud page, so it has to be turned
+      // into fetchable audio here first. Nothing plays until it comes back.
+      player.stop()
+      resolvingCast = true
+      pendingResumeSec = resume
+      resolver.start(episode.audioUrl)
+      return true
+    }
+
+    if (caster.wanted) caster.stop()
     player.loadSource("archive", episode.audioUrl, resume)
     return true
   }
+
+  // Where an archive should pick up once its cast URL resolves.
+  property real pendingResumeSec: 0
+
+  Connections {
+    target: resolver
+
+    function onResolved(source, url, contentType) {
+      if (!root.archiveMode || !root.hasArchiveEpisode) return
+      if (source !== root.archiveEpisode.audioUrl) return
+      root.resolvingCast = false
+      root.archiveIsLocal = false
+      caster.mediaContentType = contentType
+      caster.loadSource(false, url, root.pendingResumeSec)
+      caster.play()
+    }
+
+    function onFailed(source, reason) {
+      if (!root.archiveMode || !root.hasArchiveEpisode) return
+      if (source !== root.archiveEpisode.audioUrl) return
+      root.resolvingCast = false
+      // The episode exists but nothing about it is castable. Rather than
+      // refuse to play it, keep the audio here and say why — the output
+      // preference is untouched and live radio still goes to the device.
+      root.archiveIsLocal = true
+      root.archiveError = reason
+      player.loadSource("archive", root.archiveEpisode.audioUrl, root.pendingResumeSec)
+    }
+  }
+
+  Resolver { id: resolver }
 
   // Back to live radio, optionally on a specific channel.
   function playLive(number) {
@@ -383,16 +441,21 @@ Item {
       requestPersist()
     }
     var url = Model.streamUrl(channel)
+    archiveIsLocal = false
+    resolvingCast = false
+    resolver.abort()
     player.mode = "live"
     player.streamUrl = url
-    caster.streamUrl = url
+    caster.mediaContentType = "audio/mpeg"
+    caster.loadSource(true, url, 0)
     pushMprisTitle()
     play()
   }
 
   function seekTo(seconds) {
     if (!archiveMode) return
-    player.seekTo(seconds)
+    if (castingAudio) caster.seekTo(seconds)
+    else player.seekTo(seconds)
     // A scrub is a deliberate move; remember it straight away rather than
     // waiting for the next progress tick.
     progressSave.restart()
@@ -400,7 +463,7 @@ Item {
 
   function seekBy(delta) {
     if (!archiveMode) return
-    seekTo(player.positionSec + Number(delta || 0))
+    seekTo(positionSec + Number(delta || 0))
   }
 
   // Is this episode the one currently on the air?
@@ -460,10 +523,17 @@ Item {
       && (wantedMode !== "cast" || wantedUuid === "" || wantedUuid === castUuid)
     if (alreadyThere) return
 
-    // An archive cannot follow the audio to a cast device, so choosing one
-    // mid-episode records the preference and leaves playback alone. It takes
-    // effect the next time live radio is on.
-    if (archiveMode) {
+    // An archive follows the audio like anything else, but it cannot simply be
+    // handed over: the two backends take different URLs — mpv resolves the
+    // episode page itself, a device needs a resolved one — so the move is a
+    // reload at the current position rather than a handover.
+    if (archiveMode && hasArchiveEpisode) {
+      var resumeAt = positionSec
+      if (castingAudio) caster.stop()
+      else player.stop()
+      resolvingCast = false
+      resolver.abort()
+
       outputMode = wantedMode
       if (wantedMode === "cast") {
         castUuid = wantedUuid
@@ -471,6 +541,7 @@ Item {
         caster.selectDevice(castUuid, castName)
       }
       requestPersist()
+      playEpisode(archiveEpisode, resumeAt)
       return
     }
 
@@ -605,7 +676,7 @@ Item {
   function saveProgress() {
     if (!archiveMode || !hasArchiveEpisode || !libraryLoaded) return
     var updated = Library.noteProgress(library, archiveEpisode,
-      player.positionSec, player.durationSec, Date.now())
+      positionSec, durationSec, Date.now())
     if (updated === library) return
     library = updated
     saveLibrary()
@@ -688,9 +759,12 @@ Item {
     // show the programme rather than the raw stream name. It is deliberately
     // not resent on every schedule change: updating it means reloading the
     // media, and a gap in the audio is worse than a stale title.
-    mediaTitle: Model.channelLabel(root.channel)
-    mediaSubtitle: root.now ? Model.barTitle(root.now) : ""
-    artworkUrl: root.now ? root.now.artworkLarge : ""
+    mediaTitle: root.archiveMode && root.hasArchiveEpisode
+      ? (root.archiveEpisode.showName || "NTS") : Model.channelLabel(root.channel)
+    mediaSubtitle: root.archiveMode && root.hasArchiveEpisode
+      ? root.archiveEpisode.name : (root.now ? Model.barTitle(root.now) : "")
+    artworkUrl: root.archiveMode && root.hasArchiveEpisode
+      ? root.archiveEpisode.artworkLarge : (root.now ? root.now.artworkLarge : "")
   }
 
   Connections {
