@@ -603,9 +603,13 @@ Item {
   property int wheelEventCount: 0
 
   function noteWheel(pixelDelta, angleDelta) {
+    wheelEventCount++
+    // A swipe ends with a stop event carrying zero in both, so keeping the
+    // literal last one would always report zeros and say nothing about which
+    // device is in use. Keep the last event that actually moved something.
+    if (pixelDelta === 0 && angleDelta === 0) return
     lastWheelPixelDelta = pixelDelta
     lastWheelAngleDelta = angleDelta
-    wheelEventCount++
   }
 
   // ---------------------------------------------------------------- browser
