@@ -335,44 +335,26 @@ function parseEpisode(raw) {
 // ---------------------------------------------------------------- tracklist
 
 function emptyTrack() {
-  return { artist: "", title: "", offsetSec: -1, durationSec: 0,
-    estimated: false, valid: false }
+  return { artist: "", title: "", valid: false }
 }
 
-// offset is seconds into the recording, which is exactly what mpv seeks to.
+// Artist and title only — deliberately not the timestamps.
 //
-// Two traps here. NTS only fingerprints part of a tracklist, so `offset` is
-// frequently null and the position lives in `offset_estimate` instead — their
-// own player falls back to it, and so does this. And `Number(null)` is 0, not
-// NaN, so a null offset sails through an isFinite check and lands every
-// untimed track at the very start of the show. Both have to be rejected
-// explicitly before the number is taken.
-function numberOrNull(value) {
-  if (value === null || value === undefined || value === "") return null
-  var number = Number(value)
-  return isFinite(number) ? number : null
-}
-
+// NTS sells "tracklist timestamps on archived episodes" as a Supporter
+// benefit. Their public episode page proves the line: it renders all of an
+// episode's track titles to anyone, but only the first three timestamps, with
+// the rest behind the paywall. The API hands out every offset unauthenticated,
+// which is their oversight to fix and not an invitation to take it — so the
+// offsets, the estimates and the per-track durations are dropped here, at the
+// parser, rather than merely left undisplayed.
+//
+// The tracklist itself stays: it is public on the same page, to the same
+// anonymous visitor.
 function trackFromEntry(entry) {
   var track = emptyTrack()
   if (!entry || typeof entry !== "object") return track
   track.artist = Model.plainText(entry.artist, 120)
   track.title = Model.plainText(entry.title, 160)
-
-  var offset = numberOrNull(entry.offset)
-  if (offset === null) {
-    offset = numberOrNull(entry.offset_estimate)
-    // Worth distinguishing: an estimate is evenly spaced rather than heard,
-    // so it can be out by a minute or so.
-    if (offset !== null) track.estimated = true
-  }
-  if (offset !== null && offset >= 0 && offset < 86400) track.offsetSec = Math.floor(offset)
-
-  var duration = numberOrNull(entry.duration)
-  if (duration === null) duration = numberOrNull(entry.duration_estimate)
-  if (duration !== null && duration > 0 && duration < 86400)
-    track.durationSec = Math.floor(duration)
-
   track.valid = track.artist !== "" || track.title !== ""
   return track
 }

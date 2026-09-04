@@ -49,8 +49,9 @@ Item {
   readonly property bool hasAudio: episode && episode.audioUrl !== ""
   readonly property int resumeAt: service && episode ? service.resumePositionFor(episode) : 0
 
-  // ---- keyboard cursor over the tracklist. Activating a track seeks to it,
-  // which is the same thing clicking its timestamp does.
+  // ---- keyboard cursor over the tracklist. Reading only: a track is not a
+  // seek target here, because the timestamps that would make it one are a
+  // Supporter benefit this plugin does not take. See NtsApi.parseTracklist.
   property int cursor: -1
   readonly property int cursorCount: tracks.length
 
@@ -62,15 +63,9 @@ Item {
     cursor = Math.max(0, Math.min(cursorCount - 1, next))
   }
 
-  function activateCursor() {
-    if (cursor < 0 || cursor >= tracks.length || !service) return
-    var track = tracks[cursor]
-    if (track.offsetSec < 0) return
-    // Seeking only means anything once this episode is the one playing, so
-    // activating a timestamp on an idle page starts it there.
-    if (!isCurrent) service.playEpisode(episode, track.offsetSec)
-    else service.seekTo(track.offsetSec)
-  }
+  // Nothing to activate on a track row; Enter falls through to playing the
+  // episode itself, which is the only action this page has.
+  function activateCursor() { playOrToggle() }
 
   function playCursor() { playOrToggle() }
   function saveCursor() { if (service) service.toggleSaveEpisode(episode) }
@@ -336,16 +331,15 @@ Item {
           width: parent.width
           title: "Tracklist"
           ink: root.ink
-          aside: root.isCurrent && root.service && root.service.canSeek
-            ? "Click a time to jump" : (root.tracks.length + " tracks")
+          aside: root.tracks.length + " tracks"
         }
 
+        // No service or episode passed any more: the list is read-only now
+        // that it carries no timestamps to seek to.
         Nts.TrackList {
           width: parent.width
           selectedIndex: root.cursor
           tracks: root.tracks
-          service: root.service
-          episode: root.episode
           ink: root.ink
         }
       }

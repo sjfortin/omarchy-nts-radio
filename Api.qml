@@ -1,6 +1,8 @@
 import QtQuick
 
+import Quickshell
 import "NtsApi.js" as NtsApi
+import "demo/Fixtures.js" as Fixtures
 
 // The plugin's whole relationship with the NTS API.
 //
@@ -19,6 +21,18 @@ Item {
   visible: false
   width: 0
   height: 0
+
+  // Demo mode: every response comes from demo/Fixtures.js and nothing touches
+  // the network. Set NTS_DEMO=1 in the shell's environment. Used for
+  // screenshots — so no NTS programme artwork ends up in published assets —
+  // and for exercising states that are otherwise a matter of waiting for the
+  // right broadcast.
+  readonly property bool demoMode: String(Quickshell.env("NTS_DEMO") || "") !== ""
+
+  // Where demo cover art lives. Resolved from this file's own location rather
+  // than the injected plugin directory, which the shell assigns after
+  // Component.onCompleted — too late for the first schedule refresh.
+  readonly property string demoBase: String(Qt.resolvedUrl("."))
 
   // Enough to fill a home page in one pass without opening a dozen sockets
   // against nts.live the moment a window appears.
@@ -98,6 +112,12 @@ Item {
     var target = String(url || "")
     if (target === "" || typeof callback !== "function") return
 
+    if (demoMode) {
+      var canned = Fixtures.bodyFor(target)
+      Qt.callLater(function() { callback(canned, canned !== "") })
+      return
+    }
+
     var settings = options && typeof options === "object" ? options : {}
     var ttl = settings.ttl === undefined ? cacheTtlMs : settings.ttl
 
@@ -123,6 +143,7 @@ Item {
       var parsed = null
       try {
         parsed = parse(text)
+        if (parsed && root.demoMode) parsed = Fixtures.paint(parsed, root.demoBase)
       } catch (e) {
         // A parser that throws on a malformed body is a bug, but it must not
         // take the window down with it.

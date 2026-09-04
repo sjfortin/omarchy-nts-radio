@@ -37,8 +37,10 @@ media keys and any other desktop media client control it like any other player.
 On Arch / Omarchy:
 
 ```bash
-sudo pacman -S --needed mpv yt-dlp mpv-mpris python-pychromecast
+omarchy pkg add mpv yt-dlp mpv-mpris python-pychromecast
 ```
+
+(or `sudo pacman -S --needed mpv yt-dlp mpv-mpris python-pychromecast`)
 
 Every one of those is in the official repos; nothing here needs the AUR. Each
 optional piece degrades quietly on its own: without `mpv-mpris` you lose media
@@ -158,10 +160,16 @@ the first result puts you back in the field to refine it.
 Every show page lists its back catalogue; every episode page carries the
 description, the broadcast date and — where NTS has one — the tracklist.
 
-**Tracklist timestamps are seek targets.** While the episode is playing, click a
-time to jump to that track. NTS fingerprints only part of most tracklists and
-evenly spaces the rest, so a time shown with a leading `~` is NTS's estimate
-rather than a heard position and may be out by a minute or so.
+**Tracklists are listed without timestamps, on purpose.** NTS sells "tracklist
+timestamps on archived episodes" as a Supporter benefit — their public episode
+page shows every track title to anyone, but only the first three times. Their
+API returns all of them without asking who is calling; that is an oversight to
+report, not a feature to spend. So the offsets are discarded at the parser and
+never reach this UI. The tracklist itself is public on the same page, so it
+stays.
+
+If you want the timestamps, they are one of the things
+[becoming an NTS Supporter](https://www.nts.live/supporters) gets you.
 
 Where you got to in a part-heard episode is remembered, so it turns up under
 *Continue listening* on Home and the episode page offers `RESUME` alongside
@@ -330,7 +338,11 @@ reads XDG desktop entries:
 
 Everything lands under `$HOME` — a `nts-radio.desktop` in
 `~/.local/share/applications` and the icon in `~/.local/share/icons/hicolor`.
-Nothing needs root. Remove it again with `install-app.sh --remove`.
+Nothing needs root.
+
+`omarchy plugin add` does not run install hooks, so this step is manual by
+design — and so is undoing it. Remove the entry with `install-app.sh --remove`
+**before** removing the plugin, since the plugin directory holds the script.
 
 The entry also carries two shortcut actions, which most launchers expose on a
 right-click: **Search NTS** and **Saved shows**, opening the browser straight
@@ -472,7 +484,9 @@ those are the files to change.
   a *progressive* format rather than HLS or DASH — a Chromecast handed a
   manifest URL sits at IDLE and never reports an error — so the resolver asks
   for `protocol=https|http` specifically.
-- **Tracklist timestamps are partly estimated** — see above.
+- **Tracklist timestamps are a paid Supporter feature** and are deliberately
+  not used here, though the API returns them unauthenticated — see
+  [Archived shows](#archived-shows).
 - **There is no host resource.** NTS models a host as a show: the site's own
   host links point at `/shows/{alias}`, which carries the presenter's image,
   biography and back catalogue. There is one show page here rather than two
@@ -486,13 +500,20 @@ those are the files to change.
 
 ## Removal
 
+If you installed the launcher entry, remove it **first** — `omarchy plugin
+remove` deletes the plugin directory, and the uninstaller lives inside it:
+
 ```bash
+~/.config/omarchy/plugins/sjfortin.nts-radio/desktop/install-app.sh --remove
 omarchy plugin remove sjfortin.nts-radio
 ```
+
+Without the launcher entry, the second line is all you need.
 
 Or, for a manual install:
 
 ```bash
+~/.config/omarchy/plugins/sjfortin.nts-radio/desktop/install-app.sh --remove
 omarchy plugin disable sjfortin.nts-radio
 rm -rf ~/.config/omarchy/plugins/sjfortin.nts-radio
 omarchy-shell shell rescanPlugins
@@ -565,11 +586,12 @@ Anything malformed in it is dropped on load rather than breaking the browser.
 
 ## Notes
 
-This is an unofficial, unaffiliated plugin. It is not endorsed by NTS Live, and
-it ships none of their artwork or trademarks — the station mark is drawn from
-your Omarchy theme's own two colours. It plays the same public streams and reads
-the same public endpoints the nts.live website does, with no borrowed
-credentials. Please support NTS at
+This is an unofficial, unaffiliated client and is not endorsed by NTS. It does
+not include NTS's official logo assets — the station mark is a typographic
+stand-in drawn from your Omarchy theme's own two colours. It plays the same
+public streams and reads the same public endpoints the nts.live website does,
+with no borrowed credentials, and it deliberately does not use the
+Supporter-only tracklist timestamps those endpoints will hand out. Please support NTS at
 [nts.live/supporters](https://www.nts.live/supporters).
 
 ## License
