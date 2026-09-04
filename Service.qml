@@ -5,7 +5,6 @@ import Quickshell.Io
 import "Model.js" as Model
 import "NtsApi.js" as NtsApi
 import "Library.js" as Library
-import "demo/Fixtures.js" as Fixtures
 
 // Shared state for every NTS bar widget instance (one per monitor), the panel
 // each of them can open, and the browser window. Playback, the schedule, the
@@ -195,22 +194,8 @@ Item {
 
   // ---------------------------------------------------------------- fetching
 
-  readonly property bool demoMode: apiClient.demoMode
-
   function refresh() {
     if (fetching) return
-    if (demoMode) {
-      // No subprocess, no network: the same parser, a canned body.
-      var parsed = Model.parseLive(Fixtures.bodyFor("/api/v2/live"), 4)
-      if (parsed) {
-        live = Fixtures.paintLive(parsed, apiClient.demoBase)
-        lastGoodFetchMs = Date.now()
-        metadataFailed = false
-      }
-      pushMprisTitle()
-      scheduleNextRefresh()
-      return
-    }
     fetching = true
     liveFetch.running = true
   }
@@ -697,9 +682,6 @@ Item {
 
   function saveLibrary() {
     if (!libraryLoaded) return
-    // Demo mode never touches the real file. Saving still works in the UI for
-    // the length of the session, which is what a screenshot or a UI test needs.
-    if (demoMode) return
     libraryFile.setText(Library.serialize(library) + "\n")
   }
 
@@ -758,16 +740,14 @@ Item {
   // it. Cheap enough to do unconditionally at startup.
   Process {
     id: libraryDirInit
-    running: !root.demoMode
+    running: true
     command: ["mkdir", "-p", root.libraryDir]
     onExited: libraryFile.reload()
   }
 
   FileView {
     id: libraryFile
-    // No path in demo mode: the fixture library is installed in
-    // Component.onCompleted and a real file load would immediately replace it.
-    path: root.demoMode ? "" : root.libraryPath
+    path: root.libraryPath
     watchChanges: false
     // The library is rewritten in full on every change; a torn file after a
     // crash would lose the lot.
@@ -1114,13 +1094,6 @@ Item {
   // -------------------------------------------------------------- lifecycle
 
   Component.onCompleted: {
-    // Demo mode loads a fixture library instead of the user's, so no real
-    // saved show — and no NTS artwork — can reach a screenshot, and nothing
-    // written during a demo touches a file the user owns.
-    if (demoMode) {
-      library = Fixtures.paintLibrary(Library.load(Fixtures.libraryBody()), apiClient.demoBase)
-      libraryLoaded = true
-    }
     player.streamUrl = Model.streamUrl(channel)
     refresh()
   }

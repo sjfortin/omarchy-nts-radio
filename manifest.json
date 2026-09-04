@@ -5,7 +5,7 @@
   "version": "2.1.0",
   "author": "Sam Fortin",
   "license": "MIT",
-  "description": "NTS Radio for Omarchy: live NTS 1 and 2 in the bar, plus a full browser window for the archive \u2014 search, show and episode pages, tracklists with seekable timestamps, and a local library of saved shows and episodes.",
+  "description": "An unofficial NTS Radio client for Omarchy: live NTS 1 and NTS 2 in the bar, plus a browser window for the archive \u2014 search, show and episode pages, tracklists, and a local library of saved shows and episodes. Plays locally through mpv or on a Chromecast.",
   "homepage": "https://github.com/sjfortin/omarchy-nts-radio",
   "kinds": [
     "service",
