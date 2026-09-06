@@ -13,7 +13,6 @@ Item {
 
   signal edited(string value)
   signal submitted(string value)
-  signal dismissed()
 
   function clear() {
     input.text = ""
@@ -53,14 +52,20 @@ Item {
     Keys.onReturnPressed: root.submitted(input.text)
     Keys.onEnterPressed: root.submitted(input.text)
     Keys.onEscapePressed: function(event) {
-      // Esc clears a query first and only closes the window when there is
+      // Esc clears a query first and only leaves the page when there is
       // nothing left to clear — the usual two-stage escape.
-      if (input.text !== "") {
-        root.clear()
-        root.edited("")
-      } else {
-        root.dismissed()
+      //
+      // The second stage is *not* handled here: leaving the event unaccepted
+      // lets it carry on up the focus chain to the window, which is what walks
+      // the back stack and ultimately closes the browser. Accepting it
+      // unconditionally — which this did — made Escape do nothing at all
+      // whenever the field was focused and empty.
+      if (input.text === "") {
+        event.accepted = false
+        return
       }
+      root.clear()
+      root.edited("")
       event.accepted = true
     }
 

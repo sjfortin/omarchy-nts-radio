@@ -426,7 +426,7 @@ Item {
       return false
     }
     if (!ytdlAvailable) {
-      archiveError = "yt-dlp is not installed — sudo pacman -S yt-dlp"
+      archiveError = "yt-dlp is not installed — omarchy pkg add yt-dlp"
       return false
     }
 
@@ -848,10 +848,18 @@ Item {
     // show the programme rather than the raw stream name. It is deliberately
     // not resent on every schedule change: updating it means reloading the
     // media, and a gap in the audio is worse than a stale title.
+    // NTS's episode records carry the show's *alias* but never its name, so an
+    // episode reached from anywhere other than a show page has showName empty.
+    // Falling through to the broadcast title keeps the speaker and the Home app
+    // showing what is actually playing rather than a bare "NTS".
     mediaTitle: root.archiveMode && root.hasArchiveEpisode
-      ? (root.archiveEpisode.showName || "NTS") : Model.channelLabel(root.channel)
+      ? (root.archiveEpisode.showName || root.archiveEpisode.name || "NTS")
+      : Model.channelLabel(root.channel)
     mediaSubtitle: root.archiveMode && root.hasArchiveEpisode
-      ? root.archiveEpisode.name : (root.now ? Model.barTitle(root.now) : "")
+      ? (root.archiveEpisode.showName
+         ? root.archiveEpisode.name
+         : NtsApi.dateLabel(root.archiveEpisode.broadcastMs))
+      : (root.now ? Model.barTitle(root.now) : "")
     artworkUrl: root.archiveMode && root.hasArchiveEpisode
       ? root.archiveEpisode.artworkLarge : (root.now ? root.now.artworkLarge : "")
   }

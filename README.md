@@ -151,14 +151,21 @@ different targets — browsing and listening are different intentions.
 | `←` `→` | scrub an archived show by 30s |
 | `Esc` | back, then close |
 | `Ctrl-W` | close |
+| `?` | show this table in the window |
 
 In search, `↓` moves out of the query field and into the results, and `↑` from
 the first result puts you back in the field to refine it.
 
+None of that is worth memorising from a README: press `?` in the browser — or
+click **? Keyboard** at the foot of the rail — and the same table appears over
+whatever you are looking at.
+
 ### Archived shows
 
-Every show page lists its back catalogue; every episode page carries the
-description, the broadcast date and — where NTS has one — the tracklist.
+Every show page lists its back catalogue, the host's biography, and — under
+**Elsewhere** — whatever links NTS holds for them, usually a Bandcamp or an
+Instagram. Every episode page carries the description, the broadcast date and —
+where NTS has one — the tracklist.
 
 **Tracklists are listed without timestamps, on purpose.** NTS sells "tracklist
 timestamps on archived episodes" as a Supporter benefit — their public episode

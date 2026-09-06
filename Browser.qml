@@ -68,6 +68,7 @@ Item {
   function close() {
     closingFromHost = true
     opened = false
+    helpOpen = false
     window.visible = false
     closingFromHost = false
   }
@@ -94,6 +95,10 @@ Item {
 
   // Where Escape goes. Entries are { page, showAlias, episode }.
   property var backStack: []
+
+  // The keyboard sheet, raised with "?". Not a page: it sits over whatever is
+  // there and takes no part in the back stack.
+  property bool helpOpen: false
 
   readonly property bool onDetail: page === "show" || page === "episode"
   // Which rail entry lights up while a detail page is open: the one it was
@@ -212,6 +217,16 @@ Item {
       focus: true
 
       Keys.onPressed: function(event) {
+        // The help sheet is modal in the only sense that matters: while it is
+        // up, the next key dismisses it rather than doing its usual job. Acting
+        // on a shortcut the user is in the middle of reading about would be a
+        // strange way to answer the question they just asked.
+        if (root.helpOpen) {
+          root.helpOpen = false
+          event.accepted = true
+          return
+        }
+
         // Escape always works, typing or not: it clears the query first (the
         // field handles that itself) and otherwise walks back.
         if (event.key === Qt.Key_Escape) {
@@ -296,6 +311,12 @@ Item {
             root.navigate("search")
             event.accepted = true
             break
+          // Every other key on this list is invisible until somebody is told
+          // about it, and this is where they are told.
+          case Qt.Key_Question:
+            root.helpOpen = true
+            event.accepted = true
+            break
           case Qt.Key_Space:
             if (root.service) root.service.togglePlayback()
             event.accepted = true
@@ -344,6 +365,7 @@ Item {
         onLiveRequested: function(channel) {
           if (root.service) root.service.playLive(channel)
         }
+        onHelpRequested: root.helpOpen = true
       }
 
       // ---- content
@@ -514,6 +536,29 @@ Item {
         onShowRequested: function(showAlias, episodeAlias) {
           if (root.service && root.service.archiveEpisode)
             root.openEpisode(root.service.archiveEpisode)
+        }
+      }
+
+      // ---- keyboard sheet
+      //
+      // Over the rail and the transport as well as the content: it describes
+      // the whole window, so covering only part of it would be a smaller claim
+      // than it makes. Loaded on first use and kept after that — it is three
+      // static lists and reopening it should be instant.
+
+      Loader {
+        anchors.fill: parent
+        z: 10
+        active: root.helpOpen || helpVisited
+        visible: root.helpOpen
+        property bool helpVisited: false
+
+        onActiveChanged: if (active) helpVisited = true
+
+        sourceComponent: Nts.ShortcutHelp {
+          ink: root.ink
+          paper: root.paper
+          onDismissed: root.helpOpen = false
         }
       }
     }

@@ -266,6 +266,38 @@ Item {
               onActivated: if (root.service) root.service.openExternal(root.show.url)
             }
           }
+
+          // Where else this host lives. NTS carries these on the show record —
+          // an Instagram, a Bandcamp, their own site — and they are the only
+          // thing on the page that leads anywhere but back to NTS, so they sit
+          // apart from the actions above rather than among them.
+          Column {
+            width: parent.width
+            spacing: Style.space(7)
+            visible: root.show !== null && root.show.externalLinks.length > 0
+
+            Nts.Caption {
+              ink: root.ink
+              dim: 0.4
+              text: "Elsewhere"
+            }
+
+            Flow {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Repeater {
+                model: root.show ? root.show.externalLinks : []
+
+                Nts.BlockButton {
+                  required property var modelData
+                  label: NtsApi.linkLabel(modelData)
+                  ink: root.ink
+                  onActivated: if (root.service) root.service.openExternal(modelData)
+                }
+              }
+            }
+          }
         }
       }
 

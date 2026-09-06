@@ -73,7 +73,25 @@ Item {
   onEpisodeChanged: load()
   Component.onCompleted: load()
 
+  // Which episode the current load() belongs to.
+  //
+  // Load-bearing. The detail request below replaces `episode` with the fuller
+  // record it fetched, and a `property var` re-emits its change signal on every
+  // assignment — object identity is not compared — so that write re-enters
+  // load() for the episode already on screen. The API cache then answers
+  // immediately, producing a freshly parsed object, which is another distinct
+  // value, which re-enters again. Left unguarded that is not a double fetch but
+  // a loop running at the speed of the event loop: measured at a full CPU core
+  // for as long as an episode page is open, with nothing visibly wrong.
+  property string loadedKey: ""
+
   function load() {
+    var key = NtsApi.episodeKey(episode)
+    // Same episode as the load already in progress: this is the detail response
+    // arriving, not a navigation. Nothing to do.
+    if (key !== "" && key === loadedKey) return
+    loadedKey = key
+
     cursor = -1
     resolvedShowName = ""
     tracks = []
@@ -302,7 +320,7 @@ Item {
               if (!root.episode) return ""
               if (root.hasAudio) {
                 if (root.service && !root.service.ytdlAvailable)
-                  return "yt-dlp is not installed — sudo pacman -S yt-dlp"
+                  return "yt-dlp is not installed — omarchy pkg add yt-dlp"
                 return ""
               }
               return root.detailLoaded

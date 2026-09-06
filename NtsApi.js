@@ -515,6 +515,43 @@ function clockFromSeconds(seconds) {
     : minutes + ":" + pad2(secs)
 }
 
+// What to call one of a show's external links.
+//
+// NTS publishes these as bare URLs — a host's Instagram, their Bandcamp, their
+// own site — with no label of any kind, so the host is the only thing there is
+// to name them by. Anything unrecognised keeps its domain, which is more use
+// than a generic "Website" on a row of four.
+var LINK_NAMES = {
+  "instagram.com": "Instagram",
+  "facebook.com": "Facebook",
+  "twitter.com": "Twitter",
+  "x.com": "X",
+  "bandcamp.com": "Bandcamp",
+  "soundcloud.com": "SoundCloud",
+  "mixcloud.com": "Mixcloud",
+  "youtube.com": "YouTube",
+  "spotify.com": "Spotify",
+  "discogs.com": "Discogs",
+  "residentadvisor.net": "Resident Advisor",
+  "ra.co": "Resident Advisor",
+  "tiktok.com": "TikTok",
+  "linktr.ee": "Linktree",
+  "patreon.com": "Patreon"
+}
+
+function linkLabel(url) {
+  var match = String(url || "").match(/^https?:\/\/([^/?#]+)/)
+  if (!match) return "Link"
+  var host = match[1].toLowerCase().replace(/^www\./, "")
+  if (LINK_NAMES[host]) return LINK_NAMES[host]
+  // A subdomain of something known — artist.bandcamp.com is the common one.
+  for (var known in LINK_NAMES) {
+    if (host.length > known.length && host.slice(-(known.length + 1)) === "." + known)
+      return LINK_NAMES[known]
+  }
+  return Model.plainText(host, 30)
+}
+
 // "3 Sep 2026" — the same shape NTS prints under a show card.
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -580,6 +617,7 @@ if (typeof module !== "undefined") {
     emptySearchResults: emptySearchResults,
     parseSearch: parseSearch,
     clockFromSeconds: clockFromSeconds,
+    linkLabel: linkLabel,
     dateLabel: dateLabel,
     episodeMeta: episodeMeta,
     episodeKey: episodeKey,

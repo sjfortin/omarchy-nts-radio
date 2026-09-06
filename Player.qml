@@ -329,7 +329,7 @@ Item {
     // ones a user can act on: a missing yt-dlp, or a private/removed upload.
     if (/ytdl_hook|youtube-dl|yt-dlp/i.test(message)) {
       if (/not found|no such file|could not be found/i.test(message))
-        return "yt-dlp is not installed — sudo pacman -S yt-dlp"
+        return "yt-dlp is not installed — omarchy pkg add yt-dlp"
       return "This episode could not be loaded"
     }
 

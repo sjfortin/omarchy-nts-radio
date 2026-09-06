@@ -22,6 +22,7 @@ Item {
 
   signal navigated(string page)
   signal liveRequested(int channel)
+  signal helpRequested()
 
   readonly property var pages: [
     { id: "home", label: "Home" },
@@ -204,6 +205,35 @@ Item {
           }
         }
       }
+    }
+  }
+
+  // The one visible trace of the keyboard surface. Everything the browser does
+  // with a bare key is otherwise invisible, and the bottom of the rail is the
+  // quietest place that is still somewhere a person looks.
+  Item {
+    id: helpHint
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    anchors.margins: Style.space(14)
+    height: helpLabel.implicitHeight + Style.space(8)
+
+    Caption {
+      id: helpLabel
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: "? Keyboard"
+      ink: root.ink
+      dim: helpHover.hovered ? 0.75 : 0.35
+    }
+
+    HoverHandler { id: helpHover }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.helpRequested()
     }
   }
 }

@@ -87,7 +87,7 @@ Item {
     if (!service) return ""
     // A missing backend outranks everything: it explains the failure the user
     // is about to hit, and it is the only problem here with a fix.
-    if (!casting && !service.mpvAvailable) return "mpv is not installed — sudo pacman -S mpv"
+    if (!casting && !service.mpvAvailable) return "mpv is not installed — omarchy pkg add mpv"
     if (service.playbackError !== "" && !playing) return service.playbackError
     if (service.metadataFailed) return service.live ? "Schedule may be out of date" : "Cannot reach NTS"
     return ""

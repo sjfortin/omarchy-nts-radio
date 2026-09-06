@@ -68,10 +68,13 @@ function decodeEntities(value) {
       var code = body.charAt(1) === "x" || body.charAt(1) === "X"
         ? parseInt(body.slice(2), 16)
         : parseInt(body.slice(1), 10)
-      // Reject anything outside the BMP-safe printable range rather than
-      // risk emitting a lone surrogate or a control character.
+      // Reject control characters and anything outside Unicode rather than
+      // risk emitting a lone surrogate or a box.
       if (!isFinite(code) || code < 32 || code > 0x10ffff) return ""
-      return String.fromCharCode(code)
+      // fromCharCode takes a UTF-16 code *unit*, so anything above the BMP —
+      // an emoji in a show title, most often — would silently wrap round to an
+      // unrelated character. fromCodePoint builds the surrogate pair properly.
+      return code > 0xffff ? String.fromCodePoint(code) : String.fromCharCode(code)
     }
     var named = ENTITIES[body.toLowerCase()]
     return named === undefined ? "" : named
