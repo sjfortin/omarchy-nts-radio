@@ -398,10 +398,15 @@ Item {
         lastError = ""
       }
       else if (deviceState === "IDLE" || deviceState === "PAUSED") everPlayed = false
-      var reported = Model.clampVolume(message.volume)
-      if (reported !== volume) {
+
+      // Named apart from `reported` above on purpose. `var` is function-scoped
+      // and hoisted, so a second `var reported` here is the same variable — it
+      // worked only because nothing read the state again afterwards, which is
+      // not a property worth relying on.
+      var reportedVolume = Model.clampVolume(message.volume)
+      if (reportedVolume !== volume) {
         applyingReportedVolume = true
-        volume = reported
+        volume = reportedVolume
         applyingReportedVolume = false
       }
       return

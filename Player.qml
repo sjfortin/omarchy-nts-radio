@@ -54,11 +54,25 @@ Item {
   // next play simply starts a new one.
   property int pausedShutdownSeconds: 300
 
+  // mpv binds this and we drive it over it, so where it lives matters.
+  //
+  // XDG_RUNTIME_DIR is the right home: 0700, per-user, and cleaned up at
+  // logout. The fallback used to be /tmp, which is shared and where the name is
+  // predictable — mpv creates the socket 0600 so another user still could not
+  // talk to it, but a file already sitting at that path is enough to stop mpv
+  // binding at all. A private directory has neither problem, and on a normal
+  // session this branch is never taken.
   readonly property string socketPath: {
     var runtimeDir = String(Quickshell.env("XDG_RUNTIME_DIR") || "")
-    var base = runtimeDir !== "" ? runtimeDir : "/tmp"
-    return base + "/omarchy-nts-radio.mpv.sock"
+    if (runtimeDir !== "") return runtimeDir + "/omarchy-nts-radio.mpv.sock"
+    var home = String(Quickshell.env("HOME") || "/tmp")
+    return home + "/.cache/omarchy-nts-radio/mpv.sock"
   }
+
+  // The directory half of the above, so the service can make sure it exists
+  // before mpv tries to bind in it. XDG_RUNTIME_DIR always does; the fallback
+  // will not on a first run.
+  readonly property string socketDir: socketPath.slice(0, socketPath.lastIndexOf("/"))
 
   // -------------------------------------------------------------- outputs
 

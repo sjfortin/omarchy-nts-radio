@@ -213,7 +213,6 @@ function emptyShow() {
     description: "",
     location: "",
     genres: [],
-    moods: [],
     artworkSmall: "",
     artworkLarge: "",
     externalLinks: [],
@@ -279,7 +278,6 @@ function parseShow(raw) {
   show.description = Model.plainText(data.description, 900)
   show.location = Model.plainText(data.location_long || data.location_short, 60)
   show.genres = genreList(data.genres)
-  show.moods = genreList(data.moods, 3)
 
   var art = pickArtwork(data.media)
   show.artworkSmall = art.small

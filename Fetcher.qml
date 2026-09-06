@@ -41,6 +41,17 @@ Item {
       // A redirect to a host we did not ask for is not something to follow
       // blindly, but NTS does 302 within its own domain; three hops is ample.
       "--location", "--max-redirs", "3",
+      // https on the way out and https on every hop after it. Without the
+      // second, a 302 is enough to move the whole exchange onto plaintext, and
+      // a redirect is exactly the part of a request we do not control.
+      "--proto", "=https",
+      "--proto-redir", "=https",
+      // The largest thing NTS answers with is a show page carrying its first
+      // page of episodes, about 40KB. This is not a real expectation, it is a
+      // ceiling: the body is collected into a string in the shell's own heap,
+      // so a response that is wrong by orders of magnitude should be dropped
+      // rather than held.
+      "--max-filesize", "4000000",
       "-H", "Accept: application/json",
       "-A", "omarchy-nts-radio",
       url

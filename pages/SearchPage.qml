@@ -71,8 +71,6 @@ Item {
   readonly property int tagsOffset: tracksOffset + tracks.length
   readonly property int cursorCount: tagsOffset + tags.length
 
-  function resetCursor() { cursor = -1 }
-
   // -1 is a real position, not "unset": it means the caret is still in the
   // search field. Moving in and out of the results moves keyboard ownership
   // with it, which is what makes bare-key shortcuts (p, b) act on the

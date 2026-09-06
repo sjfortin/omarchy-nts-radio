@@ -166,7 +166,6 @@ Item {
   readonly property var currentChannel: live && live[channel] ? live[channel] : Model.emptyChannel(channel)
   readonly property var now: currentChannel.now
   readonly property var upNext: currentChannel.upNext
-  readonly property bool hasMetadata: now && now.valid === true
 
   function channelState(number) {
     var wanted = Model.channelNumber(number)
@@ -180,6 +179,22 @@ Item {
 
   function addWatcher() { uiWatchers++ }
   function removeWatcher() { uiWatchers = Math.max(0, uiWatchers - 1) }
+
+  // A surface that actually shows the output list is on screen, which today
+  // means the bar panel and nothing else.
+  //
+  // Kept apart from uiWatchers because the two answer different questions. The
+  // schedule wants to know whether *anything* is looking at it; the cast bridge
+  // is a Python process and wants to know whether anyone can see a device. The
+  // browser window is the case that separates them: it counts as a watcher for
+  // a whole listening session but has no cast controls anywhere in it, so
+  // tying the bridge to uiActive left python3 resident for the session with
+  // nothing to do.
+  property int castWatchers: 0
+  readonly property bool castUiActive: castWatchers > 0
+
+  function addCastWatcher() { castWatchers++ }
+  function removeCastWatcher() { castWatchers = Math.max(0, castWatchers - 1) }
 
   // A clock only while something is showing it, so an idle shell does no
   // per-second work.
@@ -290,9 +305,12 @@ Item {
     id: liveFetch
     running: false
     // -f fails the request on an HTTP error, --max-time bounds the whole
-    // exchange so a hung connection can never wedge the widget. The work
+    // exchange so a hung connection can never wedge the widget, and --proto
+    // refuses to speak anything but https. No --location here: the live
+    // endpoint does not redirect, so there is nothing to follow. The work
     // happens in a subprocess, so the UI thread never blocks on the network.
     command: ["curl", "-fsS", "--compressed", "--max-time", "12",
+      "--proto", "=https", "--max-filesize", "4000000",
       "-H", "Accept: application/json", Model.LIVE_ENDPOINT]
 
     stdout: StdioCollector {
@@ -794,12 +812,15 @@ Item {
     }
   }
 
-  // The directory will not exist on a first run, and FileView will not create
-  // it. Cheap enough to do unconditionally at startup.
+  // Neither directory will exist on a first run, and FileView will not create
+  // the one it writes into. Cheap enough to do unconditionally at startup.
+  // mpv's socket directory is only ever missing on the XDG_RUNTIME_DIR-less
+  // fallback path, but making it here costs nothing and means the player never
+  // has to care which branch it got.
   Process {
     id: libraryDirInit
     running: true
-    command: ["mkdir", "-p", root.libraryDir]
+    command: ["mkdir", "-p", root.libraryDir, player.socketDir]
     onExited: libraryFile.reload()
   }
 
@@ -843,7 +864,7 @@ Item {
     pluginDir: root.pluginDir
     // The bridge is a Python process; it runs only while a panel is showing
     // device choices or a cast is actually in progress.
-    bridgeEnabled: root.uiActive || caster.wanted
+    bridgeEnabled: root.castUiActive || caster.wanted
     // Metadata is sent when playback starts, so the device and the Home app
     // show the programme rather than the raw stream name. It is deliberately
     // not resent on every schedule change: updating it means reloading the

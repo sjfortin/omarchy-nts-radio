@@ -64,8 +64,6 @@ Flickable {
     contentY = Math.max(0, Math.min(maxContentY, contentY + delta))
   }
 
-  function scrollToTop() { contentY = 0 }
-
   WheelHandler {
     // Both, because the two are told apart by which delta they carry rather
     // than by which device Qt says they are — a touchpad reports as a mouse

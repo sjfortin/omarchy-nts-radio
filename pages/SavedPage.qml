@@ -36,8 +36,6 @@ Item {
   readonly property var cursorItems: tab === "shows" ? shows : episodes
   readonly property int cursorCount: cursorItems.length
 
-  function resetCursor() { cursor = -1 }
-
   function moveCursor(delta) {
     if (cursorCount === 0) return
     var next = cursor < 0 ? (delta > 0 ? 0 : cursorCount - 1) : cursor + delta

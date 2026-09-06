@@ -55,8 +55,6 @@ Item {
   property int cursor: -1
   readonly property int cursorCount: tracks.length
 
-  function resetCursor() { cursor = -1 }
-
   function moveCursor(delta) {
     if (cursorCount === 0) return
     var next = cursor < 0 ? (delta > 0 ? 0 : cursorCount - 1) : cursor + delta

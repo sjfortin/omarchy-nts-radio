@@ -105,13 +105,23 @@ BarWidget {
   }
 
   // The service polls faster while any UI is on screen; this is how it knows.
+  //
+  // The panel registers twice, because it is both: a surface watching the
+  // schedule, and the only surface in the plugin that shows the output list.
+  // The cast bridge follows the second of those, so it is not kept alive by a
+  // browser window that has no use for it.
   function syncWatcher() {
     if (!service) return
     var shouldWatch = popupOpen
     if (shouldWatch === watching) return
     watching = shouldWatch
-    if (shouldWatch) service.addWatcher()
-    else service.removeWatcher()
+    if (shouldWatch) {
+      service.addWatcher()
+      service.addCastWatcher()
+    } else {
+      service.removeWatcher()
+      service.removeCastWatcher()
+    }
   }
 
   function setPopupOpen(value) {
@@ -126,16 +136,27 @@ BarWidget {
   Component.onDestruction: {
     if (watching && service) {
       service.removeWatcher()
+      service.removeCastWatcher()
       watching = false
     }
   }
 
+  // The shell builds services and widgets in one sweep and the order is not
+  // guaranteed, so a widget that lands first waits for its service. Bounded:
+  // if it has not appeared in fifteen seconds it is not coming, and a widget
+  // retrying twice a second for the rest of the session helps nobody. The
+  // widget still draws — it simply has nothing to report.
+  property int resolveAttempts: 0
+
   Timer {
     interval: 500
     repeat: true
-    running: root.service === null
+    running: root.service === null && root.resolveAttempts < 30
     triggeredOnStart: true
-    onTriggered: root.resolveService()
+    onTriggered: {
+      root.resolveAttempts++
+      root.resolveService()
+    }
   }
 
   Connections {

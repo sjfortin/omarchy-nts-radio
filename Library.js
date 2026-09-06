@@ -52,7 +52,11 @@ function savedShowFromEntry(entry) {
     artworkSmall: Model.safeArtwork(entry.artworkSmall),
     artworkLarge: Model.safeArtwork(entry.artworkLarge),
     location: Model.plainText(entry.location, 60),
-    savedAt: Model.parseTimestamp(entry.savedAt) || Number(entry.savedAt) || 0,
+    // A count of milliseconds, the way every other timestamp in this file is
+    // stored. This used to run through parseTimestamp first, which is for ISO
+    // strings and answers 0 for a number — harmless, since the fallback caught
+    // it, but it also meant a four-digit value would parse as a *year*.
+    savedAt: Number(entry.savedAt) || 0,
     valid: true
   }
 }

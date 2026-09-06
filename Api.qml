@@ -34,13 +34,22 @@ Item {
 
   // Bounded so a long session cannot grow the cache without limit. Entries
   // are evicted oldest-first, which for a browser is also least-recently-shown.
+  //
+  // Two bounds, because a count on its own is not one. NTS answers a show page
+  // carrying its first page of episodes in about 40KB and a search in about
+  // 16KB, so 120 entries is somewhere between three and five megabytes of raw
+  // JSON — held as QML strings, which are UTF-16, and held for the life of the
+  // shell rather than the life of the window, because this object belongs to
+  // the service. The byte ceiling is the one that actually describes the cost.
   property int maxCacheEntries: 120
+  property int maxCacheBytes: 2000000
 
   // url -> { text, atMs }. Deliberately a plain object and deliberately not
   // bound to anything in the UI: nothing should re-render because a cache
   // entry landed.
   property var cache: ({})
   property int cacheCount: 0
+  property int cacheBytes: 0
 
   // Pending work, oldest first: { url, callback, ttl, tries }
   property var queue: []
@@ -63,29 +72,37 @@ Item {
 
   function store(url, text) {
     if (text === "") return
-    if (!cache[url]) cacheCount++
+    if (cache[url]) {
+      cacheCount--
+      cacheBytes -= cache[url].text.length
+    }
+    cacheCount++
+    cacheBytes += text.length
     cache[url] = { text: text, atMs: Date.now() }
-    if (cacheCount <= maxCacheEntries) return
+    if (cacheCount <= maxCacheEntries && cacheBytes <= maxCacheBytes) return
 
-    // Evict the oldest quarter in one pass, so this is amortised rather than
-    // running on every insert once the cap is reached.
+    // Oldest first, which for a browser is also least-recently-shown. Evicting
+    // a quarter of the entries in one pass keeps this amortised rather than
+    // running on every insert once a cap is reached, and the loop keeps going
+    // while the byte ceiling is still exceeded — one very large response should
+    // not be able to sit above the limit just because the count is fine.
     var entries = []
     for (var key in cache) entries.push({ key: key, atMs: cache[key].atMs })
     entries.sort(function(a, b) { return a.atMs - b.atMs })
+
     var drop = Math.max(1, Math.floor(entries.length / 4))
-    for (var i = 0; i < drop; i++) delete cache[entries[i].key]
-    cacheCount = entries.length - drop
-  }
-
-  function invalidate(url) {
-    if (!cache[url]) return
-    delete cache[url]
-    cacheCount = Math.max(0, cacheCount - 1)
-  }
-
-  function clearCache() {
-    cache = ({})
-    cacheCount = 0
+    for (var i = 0; i < entries.length; i++) {
+      if (i >= drop && cacheCount <= maxCacheEntries && cacheBytes <= maxCacheBytes) break
+      cacheBytes -= cache[entries[i].key].text.length
+      cacheCount--
+      delete cache[entries[i].key]
+    }
+    if (cacheCount <= 0) {
+      // Belt and braces: an empty table has no bytes in it, whatever the
+      // running total says.
+      cacheCount = 0
+      cacheBytes = 0
+    }
   }
 
   // ------------------------------------------------------------- scheduling
@@ -263,8 +280,10 @@ Item {
     }
   }
 
-  // Nothing outlives the window that owns it: dropping in-flight work on
-  // destruction stops a callback firing into a page that no longer exists.
+  // This object belongs to the service, so it outlives every window that uses
+  // it and is destroyed only when the plugin is disabled or the shell goes
+  // down. Dropping in-flight work here stops a callback firing into a page —
+  // or a slot — that is already gone.
   Component.onDestruction: {
     queue = []
     retryQueue = []

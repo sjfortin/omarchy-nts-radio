@@ -108,44 +108,48 @@ class Bridge(CastStatusListener, MediaStatusListener):
 
     def _discover_now(self, timeout=6):
         """Refresh the device table. Safe to call from any worker thread."""
-        def run():
-            try:
-                casts, browser = pychromecast.get_chromecasts(timeout=float(timeout))
-            except Exception as exc:
-                emit(event="error", message="discovery failed: {}".format(exc))
-                return
+        try:
+            casts, browser = pychromecast.get_chromecasts(timeout=float(timeout))
+        except Exception as exc:
+            emit(event="error", message="discovery failed: {}".format(exc))
+            return
 
-            with self.lock:
-                # Keep the connected device's object; replacing it would drop
-                # the live session out from under an active cast.
-                connected_uuid = str(self.cast.cast_info.uuid) if self.cast else None
-                found = {}
-                for cast in casts:
-                    uuid = str(cast.cast_info.uuid)
-                    if connected_uuid and uuid == connected_uuid:
-                        found[uuid] = self.cast
-                        continue
-                    found[uuid] = cast
-                self.devices = found
-                if self.browser is not None:
-                    try:
-                        pychromecast.discovery.stop_discovery(self.browser)
-                    except Exception:
-                        pass
-                self.browser = browser
+        with self.lock:
+            # Keep the connected device's object; replacing it would drop
+            # the live session out from under an active cast.
+            #
+            # One read, held in a local. Attribute assignment is atomic under
+            # the GIL, so a snapshot is all the synchronisation this needs — but
+            # testing self.cast and then dereferencing it is two reads, and a
+            # disconnect landing between them is exactly the window to avoid.
+            connected = self.cast
+            connected_uuid = str(connected.cast_info.uuid) if connected else None
+            found = {}
+            for cast in casts:
+                uuid = str(cast.cast_info.uuid)
+                if connected_uuid and uuid == connected_uuid:
+                    found[uuid] = connected
+                    continue
+                found[uuid] = cast
+            self.devices = found
+            if self.browser is not None:
+                try:
+                    pychromecast.discovery.stop_discovery(self.browser)
+                except Exception:
+                    pass
+            self.browser = browser
+            listing = list(self.devices.values())
 
-            emit(event="devices", devices=[
-                {
-                    "uuid": str(c.cast_info.uuid),
-                    "name": clean(c.cast_info.friendly_name, 80),
-                    "model": clean(c.cast_info.model_name, 80),
-                    "host": str(c.cast_info.host),
-                    "port": int(c.cast_info.port),
-                }
-                for c in self.devices.values()
-            ])
-
-        run()
+        emit(event="devices", devices=[
+            {
+                "uuid": str(c.cast_info.uuid),
+                "name": clean(c.cast_info.friendly_name, 80),
+                "model": clean(c.cast_info.model_name, 80),
+                "host": str(c.cast_info.host),
+                "port": int(c.cast_info.port),
+            }
+            for c in listing
+        ])
 
     # ----------------------------------------------------------- connection
 
@@ -168,7 +172,8 @@ class Bridge(CastStatusListener, MediaStatusListener):
             emit(event="error", message="that device is not on this network")
             return
 
-        if self.cast is not None and str(self.cast.cast_info.uuid) == uuid:
+        current = self.cast
+        if current is not None and str(current.cast_info.uuid) == uuid:
             return  # already connected
 
         self.disconnect()
@@ -212,7 +217,12 @@ class Bridge(CastStatusListener, MediaStatusListener):
 
     def play(self, url, title="", subtitle="", artwork="", live=True, start=0,
              content_type="audio/mpeg"):
-        if self.cast is None:
+        # Snapshot rather than read self.cast repeatedly: commands arrive on the
+        # stdin thread while connect and disconnect run on workers, so the
+        # attribute can be replaced between two reads of it. Every method below
+        # takes the same precaution.
+        cast = self.cast
+        if cast is None:
             emit(event="error", message="not connected to a device")
             return
         if not str(url).startswith("https://"):
@@ -239,7 +249,7 @@ class Bridge(CastStatusListener, MediaStatusListener):
             wanted_type = "audio/mpeg"
 
         try:
-            self.cast.media_controller.play_media(
+            cast.media_controller.play_media(
                 str(url),
                 content_type=wanted_type,
                 title=clean(title) or "NTS Radio",
@@ -248,7 +258,7 @@ class Bridge(CastStatusListener, MediaStatusListener):
                 current_time=offset if (not live and offset > 0) else None,
                 metadata=metadata,
             )
-            self.cast.media_controller.block_until_active(timeout=12)
+            cast.media_controller.block_until_active(timeout=12)
         except Exception as exc:
             emit(event="error", message="could not start playback: {}".format(exc))
 
@@ -258,10 +268,11 @@ class Bridge(CastStatusListener, MediaStatusListener):
         Meaningless for live radio, where the device has no timeline; the
         caller only sends this for BUFFERED media.
         """
-        if self.cast is None:
+        cast = self.cast
+        if cast is None:
             return
         try:
-            self.cast.media_controller.seek(max(0.0, float(position)))
+            cast.media_controller.seek(max(0.0, float(position)))
         except Exception as exc:
             emit(event="error", message="could not seek: {}".format(exc))
 
@@ -271,18 +282,20 @@ class Bridge(CastStatusListener, MediaStatusListener):
         Only sent for BUFFERED media. Pausing live radio is meaningless — there
         is nothing to come back to — so the caller stops it instead.
         """
-        if self.cast is None:
+        cast = self.cast
+        if cast is None:
             return
         try:
-            self.cast.media_controller.pause()
+            cast.media_controller.pause()
         except Exception as exc:
             emit(event="error", message="could not pause: {}".format(exc))
 
     def resume(self):
-        if self.cast is None:
+        cast = self.cast
+        if cast is None:
             return
         try:
-            self.cast.media_controller.play()
+            cast.media_controller.play()
         except Exception as exc:
             emit(event="error", message="could not resume: {}".format(exc))
 
@@ -294,24 +307,26 @@ class Bridge(CastStatusListener, MediaStatusListener):
         went quiet. Quitting the app returns it to whatever it was doing
         before, which is what a user means by "stop casting".
         """
-        if self.cast is None:
+        cast = self.cast
+        if cast is None:
             return
         try:
-            self.cast.media_controller.stop()
+            cast.media_controller.stop()
         except Exception as exc:
             emit(event="error", message="could not stop playback: {}".format(exc))
         try:
-            self.cast.quit_app()
+            cast.quit_app()
         except Exception:
             # Best effort: the stream is already stopped, which is the part
             # the user asked for.
             pass
 
     def set_volume(self, level):
-        if self.cast is None:
+        cast = self.cast
+        if cast is None:
             return
         try:
-            self.cast.set_volume(max(0.0, min(1.0, float(level) / 100.0)))
+            cast.set_volume(max(0.0, min(1.0, float(level) / 100.0)))
         except Exception as exc:
             emit(event="error", message="could not set volume: {}".format(exc))
 
@@ -352,9 +367,10 @@ class Bridge(CastStatusListener, MediaStatusListener):
         emit(event="error", message="device rejected the stream (code {})".format(error_code))
 
     def _player_state(self):
-        if self.cast is None:
+        cast = self.cast
+        if cast is None:
             return "IDLE"
-        status = self.cast.media_controller.status
+        status = cast.media_controller.status
         return clean(getattr(status, "player_state", "IDLE"), 20)
 
     # ------------------------------------------------------------- shutdown
@@ -420,7 +436,13 @@ def main():
             except Exception:
                 # One bad command must never take the bridge down; the QML side
                 # would see the process vanish and report casting as broken.
-                emit(event="error", message=traceback.format_exc(limit=1).strip())
+                #
+                # The detail goes to stderr, which is for whoever is debugging
+                # this. What reaches the UI is a sentence: a QML error line is
+                # not a place for a Python traceback, and the file paths in one
+                # are nobody's business but this machine's.
+                traceback.print_exc(file=sys.stderr)
+                emit(event="error", message="the cast helper could not do that")
     except KeyboardInterrupt:
         pass
     finally:
