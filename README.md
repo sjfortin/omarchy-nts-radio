@@ -1,67 +1,40 @@
 # NTS Radio for Omarchy
 
-A [NTS Radio](https://www.nts.live) client for Omarchy: live NTS 1 and NTS 2 in
-the top bar, and a full browser window for the archive.
+An unofficial [NTS Radio](https://www.nts.live) client: live NTS 1 and NTS 2 in
+the top bar, and a browser window for the archive.
 
 ![The NTS browser window](browser.png)
 
-Two surfaces, one player.
-
-**In the bar** — the station mark, which channel you are on, and whether audio
-is flowing. Click it for the panel: channel selector, the current broadcast with
-artwork, transport, output, and what is coming up next.
+- Live radio in the bar, with the current broadcast title and playback controls.
+- A browser window for the archive: search, show pages, episode pages,
+  tracklists.
+- A local library of saved shows and episodes, with resume positions.
+- Audio plays locally through mpv, or on a Chromecast device that fetches the
+  stream itself.
+- Media keys and MPRIS, a scriptable IPC surface, and an optional launcher
+  entry.
 
 ![The NTS Radio panel](preview.png)
 
-**The browser window** — search NTS by show, host, track or tag; browse any
-show's back catalogue; open an episode for its description and tracklist; and
-keep a library of saved shows and episodes. Archived episodes play through the
-same player as live radio, so moving between them is one click and closing the
-window never interrupts anything.
-
-Audio plays locally through **mpv** and PipeWire, or on a Chromecast device that
-fetches the stream itself — live radio and archived shows alike. There is no embedded browser and no background
-daemon — mpv runs only while something is playing, and it exposes MPRIS, so
-media keys and any other desktop media client control it like any other player.
-
 ## Requirements
 
-| Dependency | Required | What it does |
-|------------|----------|--------------|
-| `mpv` | for playback | plays live streams and archived episodes on this machine |
-| `curl` | yes | fetches the schedule and everything in the browser (already present on Omarchy) |
-| `yt-dlp` | for the archive | resolves archived episodes, which NTS hosts on SoundCloud / Mixcloud — needed for playing them here *and* for casting them |
-| `mpv-mpris` | optional | media-key and MPRIS control |
-| `python-pychromecast` | optional | casting to Chromecast / Google Home / Nest devices |
-
-On Arch / Omarchy:
+| Package | Needed for | Without it |
+|---------|------------|------------|
+| `mpv` | playing anything locally | the panel says so instead of failing with a stream error |
+| `curl` | the schedule and the browser | already present on Omarchy |
+| `yt-dlp` | archived episodes | live radio still works, the archive goes quiet |
+| `mpv-mpris` | media keys and MPRIS | everything else works, you lose media keys |
+| `python-pychromecast` | casting | the panel does not offer casting |
 
 ```bash
 omarchy pkg add mpv yt-dlp mpv-mpris python-pychromecast
 ```
 
-Every one of those is in the official repos; nothing here needs the AUR. Each
-optional piece degrades quietly on its own: without `mpv-mpris` you lose media
-keys, without `python-pychromecast` the panel simply does not offer casting,
-without `yt-dlp` live radio still works and only the archive goes quiet, and
-without `mpv` the panel says so and points at the install command instead of
-failing with a stream error.
+All four are in the official repos. Nothing here needs the AUR.
 
-The plugin itself needs no elevated privileges: nothing it runs requires sudo
-or pkexec, it writes only inside your own home directory, and it never edits
-system configuration. Installing the packages above is the only step that
-touches anything system-wide, and `omarchy pkg add` is what handles it.
-
-Why `yt-dlp` is needed for the archive is explained under
-[Archived shows](#archived-shows) — briefly, NTS does not host its own episode
-audio.
-
-Without `mpv-mpris` everything still works; you just lose media-key control.
-The plugin looks for the script at `/etc/mpv/scripts/mpris.so`,
-`/usr/lib/mpv/mpris.so`, `/usr/local/lib/mpv/mpris.so`,
-`/usr/lib/x86_64-linux-gnu/mpv/mpris.so`, `~/.config/mpv/scripts/mpris.so` and
-`~/.local/share/mpv/scripts/mpris.so`. `omarchy-shell nts-radio status` reports
-`"mpris": true` when it found one.
+The plugin needs no elevated privileges. Nothing it runs requires sudo or
+pkexec, it writes only inside your home directory, and it never edits system
+configuration.
 
 ## Install
 
@@ -69,224 +42,129 @@ The plugin looks for the script at `/etc/mpv/scripts/mpris.so`,
 omarchy plugin add https://github.com/sjfortin/omarchy-nts-radio.git --enable --yes
 ```
 
-Or by hand:
+The widget lands on the right of the bar. Move it with `omarchy bar move`.
 
-```bash
-git clone https://github.com/sjfortin/omarchy-nts-radio.git \
-  ~/.config/omarchy/plugins/sjfortin.nts-radio
-omarchy-shell shell rescanPlugins
-omarchy plugin enable sjfortin.nts-radio
-```
-
-The widget lands on the right of the bar. Move it with `omarchy bar move`:
-
-```bash
-omarchy bar move sjfortin.nts-radio --section right --after omarchy.tray
-```
-
-## Using it
-
-### In the bar
+## In the bar
 
 | Action | Result |
 |--------|--------|
-| Click | open / close the panel |
-| Middle-click | play / pause |
-| Right-click | switch NTS 1 / NTS 2 — or, from an archived show, back to live |
-| Scroll | volume up / down |
+| Click | open or close the panel |
+| Middle-click | play or pause |
+| Right-click | switch NTS 1 / NTS 2, or return to live from an archived show |
+| Scroll | volume |
 
-The bar always shows what is actually playing. On live radio that is the channel
-number and the broadcast title; on an archived show the channel is replaced by
-`ARC` and the title is the episode, so the widget never claims to be playing
-NTS 2 while a two-year-old show is coming out of the speakers.
+The bar shows what is actually playing. On live radio that is the channel
+number and the broadcast title. On an archived show the channel is replaced by
+`ARC` and the title is the episode.
 
-### In the panel
+The panel has both channels (each showing what is on it right now), play/pause,
+volume, output selection, and what is coming up next. `BROWSE` opens the
+browser window, `OPEN` opens the current show on nts.live, and `LIVE` returns
+to live radio from an archived show.
 
-Click either channel block to switch — the selected one is inverted, and each
-block shows what is on that channel right now so you can choose without
-switching first. `PLAY` / `PAUSE` starts and stops, `VOL` sets the stream's own
-volume (independent of your system volume).
+Playback is not tied to the panel. Closing it, moving the widget, or opening a
+different bar panel all leave audio running.
 
-The bottom row is `BROWSE` (open the browser window), `LIVE` (only while an
-archived show is playing — one press back to live radio) and `OPEN` (the current
-show on nts.live).
-
-While an archived show is playing the panel shows its artwork, its broadcast
-date, and how far through it you are, instead of the live schedule.
-
-Playback is not tied to the panel. Closing the panel, moving the widget, or
-opening a different bar panel all leave audio running.
-
-### The browser window
-
-Open it from `BROWSE` in the panel, from the app launcher (see
-[As an app](#as-an-app)), or:
+## The browser window
 
 ```bash
 omarchy-shell nts-radio browser
 ```
 
-Three destinations in the left rail, plus both live channels always one click
+Three destinations in the left rail, with both live channels always one click
 away:
 
-- **Home** — what is on air now, what you were part way through, your saved
-  shows, and NTS's own editorial rails (NTS Picks, Recently added).
-- **Search** — grouped results across shows, episodes, tracks and tags.
-- **Saved** — your library, in two tabs: shows and episodes.
+- **Home**: what is on air, what you were part way through, your saved shows,
+  and NTS Picks / Recently added.
+- **Search**: grouped results across shows, episodes, tracks and tags.
+- **Saved**: your library, in two tabs.
 
-Clicking a row opens it; clicking its artwork plays it. Those are deliberately
-different targets — browsing and listening are different intentions.
+Clicking a row opens it. Clicking its artwork plays it.
 
-**Keyboard**
+Press `?` in the window, or click **? Keyboard** at the foot of the rail, for
+this table:
 
 | Key | Action |
 |-----|--------|
-| `/` or `Ctrl-F` | jump to search |
-| `↑` `↓` or `k` `j` | move the cursor through results |
-| `PgUp` `PgDn` | move the cursor five at a time |
+| `/` or `Ctrl-F` | search |
+| `↑` `↓` or `k` `j` | move the cursor |
+| `PgUp` `PgDn` | move five at a time |
 | `Enter` | open what the cursor is on |
 | `p` | play what the cursor is on |
-| `b` | save / unsave what the cursor is on |
-| `Tab` | switch tabs (on Saved) |
-| `Space` | play / pause whatever is on air |
-| `1` `2` | back to live NTS 1 / NTS 2 |
+| `b` | save or unsave what the cursor is on |
+| `Tab` | switch tabs on Saved |
+| `Space` | play or pause |
+| `1` `2` | live NTS 1 / NTS 2 |
 | `h` `s` | Home / Saved |
 | `←` `→` | scrub an archived show by 30s |
 | `Esc` | back, then close |
 | `Ctrl-W` | close |
-| `?` | show this table in the window |
 
-In search, `↓` moves out of the query field and into the results, and `↑` from
-the first result puts you back in the field to refine it.
+In search, `↓` moves out of the query field into the results, and `↑` from the
+first result puts you back in the field.
 
-None of that is worth memorising from a README: press `?` in the browser — or
-click **? Keyboard** at the foot of the rail — and the same table appears over
-whatever you are looking at.
+The window is an ordinary XDG toplevel, not a layer-shell overlay. It tiles,
+moves between workspaces, and answers your window bindings. The card grids grow
+a column rather than stretching, so a wider window shows more shows rather than
+bigger ones.
 
-### Archived shows
+## The archive and your library
 
-Every show page lists its back catalogue, the host's biography, and — under
-**Elsewhere** — whatever links NTS holds for them, usually a Bandcamp or an
-Instagram. Every episode page carries the description, the broadcast date and —
-where NTS has one — the tracklist.
+Show pages carry the back catalogue, the host's biography, and their external
+links. Episode pages carry the description, the broadcast date, and the
+tracklist where NTS has one. Where you got to in a part-heard episode is
+remembered, so it appears under *Continue listening* and the episode page
+offers `RESUME` alongside `FROM START`.
 
-**Tracklists are listed without timestamps, on purpose.** NTS sells "tracklist
-timestamps on archived episodes" as a Supporter benefit — their public episode
-page shows every track title to anyone, but only the first three times. Their
-API returns all of them without asking who is calling; that is an oversight to
-report, not a feature to spend. So the offsets are discarded at the parser and
-never reach this UI. The tracklist itself is public on the same page, so it
-stays.
+`SAVE` on any show or episode adds it to your library, which lives at
+`~/.local/state/omarchy/nts-radio/library.json`. It is a plain file you own and
+can edit or sync yourself. It is not your NTS account: NTS authenticates
+through Firebase with email and password and publishes no third-party
+integration surface, so a login here could only mean taking your real NTS
+password. Saves made here do not appear on nts.live or in the NTS app, and
+favourites there do not appear here.
 
-If you want the timestamps, they are one of the things
-[becoming an NTS Supporter](https://www.nts.live/supporters) gets you.
+Two things are worth knowing about archived playback.
 
-Where you got to in a part-heard episode is remembered, so it turns up under
-*Continue listening* on Home and the episode page offers `RESUME` alongside
-`FROM START`.
+**It needs `yt-dlp`.** NTS does not host archived audio. Every episode points
+at a SoundCloud or Mixcloud upload, which is what nts.live plays too, and mpv's
+ytdl hook is what resolves those. Live radio does not use it. Episodes NTS
+never uploaded are listed with *No audio*.
 
-**Why `yt-dlp`.** NTS does not host archived audio. Every episode in their API
-points at a SoundCloud or Mixcloud upload, which is what their own website plays
-too. mpv's ytdl hook resolves those, so `yt-dlp` is what turns an episode page
-into sound. Live radio does not use it at all.
+**Tracklists are shown without timestamps, on purpose.** NTS sells those as a
+[Supporter](https://www.nts.live/supporters) benefit. Their API returns them
+without asking who is calling, so the plugin discards them at the parser.
 
-NTS's own API has an endpoint that would hand back a direct audio URL, but only
-against a token embedded in their website — their client credential, not
-yours. Shipping someone else's API token inside a plugin is not something this
-does, and `yt-dlp` reaches exactly the same public audio without borrowing one.
+## Casting
 
-### Saved shows and episodes — and why there is no login
-
-`SAVE` on any show or episode adds it to your library; the `Saved` page is that
-library, and the browser reads it offline.
-
-**The library is local.** It lives in
-`~/.local/state/omarchy/nts-radio/library.json` — a plain JSON file you own, can
-read, can edit, and can sync yourself if you want to.
-
-It is not your NTS account, and that is a deliberate decision rather than an
-omission. NTS authenticates through Firebase with an email-and-password
-provider. There is no public developer API, no OAuth flow, no browser-based
-authorization a third-party client can use, and nothing NTS documents for
-integrations. The only way to implement "log in to NTS" here would be to put a
-password field in this plugin, take your real NTS credentials, and replay them
-against Google's identity endpoint using NTS's own embedded API key.
-
-That is credential scraping with extra steps. It would ask you to trust a
-third-party bar widget with an account password, it would break without warning
-the moment NTS changed anything, and it would be handling secrets that a desktop
-plugin has no business handling. So the plugin does not do it, and keeps a local
-library instead. If NTS ever publishes a real integration surface, this is the
-part that would change.
-
-The practical differences: saves made here do not appear on nts.live or in the
-NTS mobile app, and favourites you already have there do not appear here.
-
-### Casting
-
-**Radio starts on this computer.** Casting is always a deliberate choice: the
-plugin never begins a session by playing on a speaker in another room, however
-you left it last time.
+Radio always starts on this computer. Casting is a deliberate choice each
+session, so the plugin never begins by playing on a speaker in another room.
 
 The `OUTPUT` section of the panel lists *This computer* plus any
-Chromecast-protocol device on your network — Chromecast, Chromecast Audio,
-Google Home, Nest speakers and displays. Pick one and the audio moves; pick
-*This computer* and it comes back. If something was playing, it keeps playing
-across the move.
+Chromecast-protocol device on your network: Chromecast, Chromecast Audio,
+Google Home, Nest speakers and displays. Pick one and the audio moves. If
+something was playing, it keeps playing across the move. Your chosen device is
+remembered so switching back is one click.
 
-Your chosen device is remembered so switching to it is one click with no
-discovery wait — but the *output* is not restored, only the device. Every
-session starts local.
+The device fetches the NTS stream itself, so nothing is re-encoded here and
+your laptop can sleep without interrupting the radio. Archived shows cast too
+and stay seekable on the device.
 
-Casting is not "route this laptop's audio elsewhere". The device fetches the
-NTS stream itself, so nothing is decoded or re-encoded here and **your laptop
-can sleep without interrupting the radio**. The plugin keeps a control
-connection only to start, stop, set volume, and report status.
+- The volume slider controls whichever output is active. The device and mpv
+  keep separate levels.
+- Media keys and MPRIS apply to local playback only, since a cast session runs
+  on the device.
+- The device shows the programme that was on air when casting started.
+  Refreshing it would mean reloading the stream and a gap in the audio.
+- A few episodes only publish formats no Chromecast can decode. Those fall back
+  to playing here, and the panel says so.
 
-**Archived shows cast too**, and they stay seekable on the device — scrub,
-pause and resume all work, and the position carries across if you move an
-episode between the speaker and this computer mid-play.
+A cast outlives the shell, so if the last session ended while casting, the
+plugin asks that device once whether it is still playing. If it is, the panel
+takes the session back so you can stop it. It only ever adopts a stream it
+recognises, so it will not take over someone else's music.
 
-A device cannot resolve a SoundCloud page on its own, so for casting the
-episode is turned into a plain audio URL here first and the device fetches
-that. It takes a second or two, which is the pause you see before an archived
-show starts on a speaker. A small number of episodes only publish formats no
-Chromecast can decode; those fall back to playing here and the panel says so.
-
-Two more consequences worth knowing:
-
-- The volume slider controls whichever output is active — the device's own
-  volume when casting, mpv's when local. They are separate levels.
-- Media keys and MPRIS apply to local playback only. A cast session is running
-  on the device, not on this machine, so there is no local player for them to
-  talk to.
-- Live radio is sent to the device as a LIVE stream, so it shows no scrub bar;
-  an archived show is sent as a finite recording, so it does.
-
-The device shows the programme that was on air when casting started. Refreshing
-that would mean reloading the stream on the device, and a gap in the audio
-every time a show changes is worse than a stale title.
-
-There is one exception to "always starts local", and it is not a preference
-being restored — it is audio that is already happening. Because the device does
-the playing, a cast can outlive this shell: if Omarchy dies while you are
-casting, the speaker keeps going with nothing controlling it. So when the last
-session ended while casting, the plugin asks that device once whether it is
-still playing one of our streams. If it is, it takes the session back so the
-panel can show it and stop it; if it is not, playback stays local and nothing
-starts. It only ever adopts a stream it recognizes, so it will never take over
-someone else's music on the same speaker.
-
-### Media keys
-
-While something is playing, mpv registers as
-`org.mpris.MediaPlayer2.mpv.ntsradio`. Play/pause keys work, and the track
-title reported to your OSD is the current NTS show or archived episode rather
-than the raw stream name. On live radio, resuming rejoins the live edge instead
-of replaying whatever was left in the buffer; on an archived show it carries on
-from where you paused.
-
-### From the command line / keybindings
+## Command line and keybindings
 
 ```bash
 omarchy-shell nts-radio toggle       # play or pause
@@ -295,26 +173,27 @@ omarchy-shell nts-radio pause
 omarchy-shell nts-radio next         # other channel
 omarchy-shell nts-radio channel 2
 omarchy-shell nts-radio volume 60
-omarchy-shell nts-radio status       # JSON: mode, playback, output, show, archive, library
-omarchy-shell nts-radio devices      # discover cast devices, as JSON
-omarchy-shell nts-radio output local            # play here
-omarchy-shell nts-radio output cast             # play on the remembered device
-omarchy-shell nts-radio output <device-uuid>    # play on a specific device
-
-omarchy-shell nts-radio browser      # open / close the browser window (toggle)
-omarchy-shell nts-radio open home    # open it without closing it again
-omarchy-shell nts-radio open search  # ... straight onto search
-omarchy-shell nts-radio open saved   # ... or your library
 omarchy-shell nts-radio live         # back to live radio
 omarchy-shell nts-radio live 2       # back to live, on NTS 2
-omarchy-shell nts-radio episode <show-alias> <episode-alias>   # play an archived show
 omarchy-shell nts-radio seek 1500    # jump to 25:00 in an archived show
-omarchy-shell nts-radio seek +30     # forward 30s
-omarchy-shell nts-radio seek -30     # back 30s
+omarchy-shell nts-radio seek +30     # forward 30s, or -30 for back
+
+omarchy-shell nts-radio browser      # open or close the browser (toggle)
+omarchy-shell nts-radio open home    # open without closing again
+omarchy-shell nts-radio open search  # or straight onto search
+omarchy-shell nts-radio open saved   # or your library
+
+omarchy-shell nts-radio output local          # play here
+omarchy-shell nts-radio output cast           # play on the remembered device
+omarchy-shell nts-radio output <device-uuid>  # play on a specific device
+omarchy-shell nts-radio devices               # discover devices, as JSON
+
+omarchy-shell nts-radio status       # JSON: playback, output, show, archive, library
+omarchy-shell nts-radio episode <show-alias> <episode-alias>
 ```
 
-The two aliases an `episode` takes are the last two path segments of its
-nts.live URL — for
+The two aliases `episode` takes are the last two path segments of the nts.live
+URL. For
 `https://www.nts.live/shows/floating-points/episodes/floating-points-27th-july-2026`
 that is `floating-points floating-points-27th-july-2026`.
 
@@ -326,292 +205,136 @@ bindd = SUPER SHIFT, M, NTS channel,    exec, omarchy-shell nts-radio next
 bindd = SUPER SHIFT, B, NTS browser,    exec, omarchy-shell nts-radio browser
 ```
 
-`browser` toggles, which is what a keybinding wants; `open` does not, which is
+`browser` toggles, which is what a keybinding wants. `open` does not, which is
 what a launcher wants.
 
-The browser can also be opened straight onto a page:
+## Launcher entry
 
-```bash
-omarchy-shell shell summon sjfortin.nts-radio '{"page":"search"}'
-```
-
-## As an app
-
-The plugin is a shell plugin, not an application — but the browser window can
-be summoned like one. A desktop entry puts it in the Omarchy menu
-(`SUPER + SPACE`, or `SUPER + ALT + SPACE` for apps) and in any launcher that
-reads XDG desktop entries:
+Optional. Puts the browser window in the Omarchy menu (`SUPER + SPACE`) and any
+launcher that reads XDG desktop entries, with right-click actions for **Search
+NTS** and **Saved shows**:
 
 ```bash
 ~/.config/omarchy/plugins/sjfortin.nts-radio/desktop/install-app.sh
 ```
 
-Everything lands under `$HOME` — a `nts-radio.desktop` in
-`~/.local/share/applications` and the icon in `~/.local/share/icons/hicolor`.
-Nothing needs root.
-
-`omarchy plugin add` does not run install hooks, so this step is manual by
-design — and so is undoing it. Remove the entry with `install-app.sh --remove`
-**before** removing the plugin, since the plugin directory holds the script.
-
-The entry also carries two shortcut actions, which most launchers expose on a
-right-click: **Search NTS** and **Saved shows**, opening the browser straight
-onto that page.
-
-**It is an ordinary window.** Not a layer-shell overlay, not a dropdown that
-floats above everything: a real XDG toplevel, so it tiles with your other
-windows, moves between workspaces, and answers every window binding you already
-have. Nothing about it is special-cased in the compositor.
-
-The layout adapts to whatever width it is given — the card grids grow a column
-rather than stretching, so a wide window shows more shows rather than bigger
-ones.
-
-If you would rather it *always* opened maximized, that is a window rule you can
-add to `~/.config/hypr/hyprland.lua` — but it is opt-in, and it does mean the
-window stops tiling normally:
-
-```lua
-o.window({ class = "^org.quickshell$", title = "^NTS$" }, { maximize = true })
-```
-
-Matched on title rather than class, because every Omarchy shell surface shares
-`org.quickshell`.
+It writes a `.desktop` file and two icons under `~/.local/share`, and nothing
+else. `omarchy plugin add` does not run install hooks, so this step is manual
+by design, and so is undoing it.
 
 ## Settings
 
 Under **Setup → Plugins → NTS Radio**, or as keys on the widget's entry in
-`~/.config/omarchy/shell.json`:
+`~/.config/omarchy/shell.json`. All take effect immediately.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `channel` | `NTS 1` | Channel to start on. Switching in the panel updates this, so the plugin comes back on the channel you left it on. |
-| `showTitleInBar` | `When playing` | `Always`, `When playing`, or `Never` for the title in the bar. |
-| `maxBarTextWidth` | `160` | Pixel cap on that title. `0` hides it. |
-| `volume` | `70` | Stream volume, remembered between sessions. |
-| `refreshMinutes` | `1` | Minutes between schedule refreshes while a panel or the browser is open, or audio is playing. |
-| `scrollSpeed` | `100` | How far a swipe or a wheel notch scrolls in the browser, as a percentage. Raise it if scrolling feels heavy; it applies immediately. |
-| `output` | `local` | Records what the last session was doing. Not restored as a starting output — radio always starts on this computer; it is only used to decide whether to ask a remembered device if it is still playing. |
-| `castDevice` | — | UUID of the remembered cast device. |
-| `castDeviceName` | — | Its friendly name, so the panel can name it before discovery finishes. |
-
-Editing these takes effect immediately — no restart.
-
-## How it behaves
-
-**Network.** The live schedule is one `curl` to
-`https://www.nts.live/api/v2/live` per refresh, capped at 12 seconds and run in
-a subprocess, so the shell's UI thread never waits on the network. While a panel
-or the browser is open, or audio is playing, that is once per `refreshMinutes`;
-otherwise once every 15 minutes. A refresh is also scheduled to land just after
-the current broadcast ends, so the panel changes over with the schedule instead
-of drifting up to a minute behind.
-
-Everything in the browser goes through one small client with at most three
-requests in flight, a 15-second timeout on each, a single retry for transport
-failures, and a five-minute in-memory cache — so revisiting a show or retyping a
-search costs nothing, and nothing is fetched for a window that is not open.
-
-**Failures.** A failed fetch keeps the last good schedule on screen and shows a
-single quiet line — never a notification, never a dialog. Pages that cannot load
-say so inline with a *Try again*. A dropped live stream reconnects on a
-5s / 15s / 45s / 60s backoff; an archived show that fails resumes from where it
-stopped rather than the top. Nothing here can take the shell down: every
-response is parsed defensively, every string is stripped of markup and
-length-capped before it reaches the UI, artwork is only loaded from NTS's own
-media hosts, and the only URL ever handed to mpv is checked against an allowlist
-of SoundCloud and Mixcloud first.
-
-Offline, the browser still opens, live-schedule data stays on screen, and your
-saved library reads normally, because it is a local file.
-
-**Waking up.** Qt timers run on a monotonic clock that does not advance while
-the machine is asleep, so after a lid-close the next scheduled refresh is still
-however long it had left — and until it lands, the bar describes a broadcast
-that finished hours ago. A cast device, meanwhile, has been playing the live
-stream the whole time, so the speaker is on the right show and the interface is
-not. The plugin notices a tick that took far longer than its own interval,
-treats that as a resume, and refreshes immediately. A fetch that was in flight
-when the machine slept is abandoned rather than left blocking the next one.
-
-**Resources.** mpv exists only while playing, and is stopped five minutes after
-you pause — an archived show remembers its position first, so pressing play
-picks it up where you left it. The cast bridge is a Python process that runs
-only while the panel is open or a cast is in progress. Closing the browser
-window destroys every page in it; playback is unaffected, because the player
-belongs to the plugin's service and not to any window. Disabling or removing the
-plugin stops everything immediately and removes mpv's IPC socket.
-
-## Architecture
-
-```
-manifest.json      plugin manifest — service + bar-widget + overlay
-Service.qml        the shared brain: schedule, playback mode, library, IPC
-Player.qml         the mpv child process and its JSON IPC socket
-Caster.qml         playback on a Chromecast device, and device discovery
-Api.qml            the API client: queue, concurrency, retries, cache
-Fetcher.qml        one HTTP GET, in a subprocess
-Resolver.qml       turns an episode page into a URL a cast device can fetch
-Model.js           live schedule endpoints, parsing and sanitization
-NtsApi.js          archive endpoints: search, shows, episodes, tracklists
-Library.js         the local library: saved shows, episodes, resume positions
-scripts/cast.py    the Chromecast bridge, newline JSON on stdin/stdout
-BarWidget.qml      the collapsed bar presence, and host for the panel popup
-Panel.qml          the bar panel — the mini-player
-Browser.qml        the browser window: routing, keyboard, layout
-NtsMark.qml        the station mark
-pages/             HomePage, SearchPage, SavedPage, ShowPage, EpisodePage
-components/        the shared kit — cards, rows, tracklist, transport, rail
-desktop/           the launcher entry, its icon, and an installer for both
-```
-
-**One service owns playback.** `Service.qml` is created once by the shell and
-lives for as long as the plugin is enabled. The bar widget resolves it, and the
-shell hands the very same object to the browser window as `service`. Neither
-surface owns the player; both are views onto it. That is the whole reason
-opening or closing the browser, switching workspaces, or moving the widget
-cannot interrupt audio — mpv is parented to the service, not to anything on
-screen.
-
-`Player.qml` handles both media, and keeps them strictly apart: a live stream
-has no end, no position and no seek, and resuming it means rejoining the live
-edge, while an archived show is an ordinary finite recording that pauses, seeks
-and finishes. Mixing those two up is the single easiest way to make a radio
-player feel broken, so the mode is explicit and the reconnect logic only applies
-to live.
-
-**One client owns the network.** Pages never fetch. They ask `Api.qml` for a
-parsed result and get a callback; queueing, concurrency, timeouts, retries and
-caching all live in one place, and every endpoint URL is built by `NtsApi.js`.
-
-**The `.js` files are pure.** `Model.js`, `NtsApi.js` and `Library.js` hold no
-QML types, do no IO and have no side effects — every NTS URL, every response
-shape and every piece of sanitization is in them. If NTS changes their service,
-those are the files to change.
-
-### NTS API limitations found while building this
-
-- **There is no public API.** Everything here was worked out from the endpoints
-  the nts.live player itself calls. They are unversioned and undocumented and
-  can change without notice.
-- **`/search` requires `version=2`.** Without it the endpoint returns HTTP 200
-  with a permanently empty `results[]`, which is indistinguishable from "no
-  matches".
-- **Episode audio is not NTS-hosted**, so archived playback depends on `yt-dlp`
-  and on the SoundCloud/Mixcloud upload still existing. Some broadcasts were
-  never uploaded; those episodes are listed with *No audio*. Casting one needs
-  a *progressive* format rather than HLS or DASH — a Chromecast handed a
-  manifest URL sits at IDLE and never reports an error — so the resolver asks
-  for `protocol=https|http` specifically.
-- **Tracklist timestamps are a paid Supporter feature** and are deliberately
-  not used here, though the API returns them unauthenticated — see
-  [Archived shows](#archived-shows).
-- **There is no host resource.** NTS models a host as a show: the site's own
-  host links point at `/shows/{alias}`, which carries the presenter's image,
-  biography and back catalogue. There is one show page here rather than two
-  pages showing the same thing.
-- **There is no addressable "series".** Saved content therefore has two tabs,
-  shows and episodes, rather than three.
-- **Authentication is Firebase email/password with no third-party flow** — see
-  [above](#saved-shows-and-episodes--and-why-there-is-no-login).
-- **Tags are not destinations.** Search returns them, but NTS has no tag page
-  this plugin can open, so selecting a tag runs it as a search.
+| `channel` | `NTS 1` | Channel to start on. Switching in the panel updates this. |
+| `showTitleInBar` | `When playing` | `Always`, `When playing`, or `Never`. |
+| `maxBarTextWidth` | `160` | Pixel cap on the bar title. `0` hides it. |
+| `volume` | `70` | Stream volume, independent of system volume. |
+| `refreshMinutes` | `1` | Minutes between schedule refreshes while a panel or the browser is open, or audio is playing. Otherwise every 15 minutes. |
+| `scrollSpeed` | `100` | How far a swipe or wheel notch scrolls in the browser, as a percentage. Raise it if scrolling feels heavy. |
+| `output` | `local` | Records what the last session was doing. Not restored as a starting output. |
+| `castDevice` | | UUID of the remembered cast device. |
+| `castDeviceName` | | Its name, so the panel can label it before discovery finishes. |
 
 ## Removal
 
-If you installed the launcher entry, remove it **first** — `omarchy plugin
-remove` deletes the plugin directory, and the uninstaller lives inside it:
+If you installed the launcher entry, remove it first: `omarchy plugin remove`
+deletes the plugin directory, and the uninstaller lives inside it.
 
 ```bash
 ~/.config/omarchy/plugins/sjfortin.nts-radio/desktop/install-app.sh --remove
 omarchy plugin remove sjfortin.nts-radio
 ```
 
-Without the launcher entry, the second line is all you need.
-
-Or, for a manual install:
-
-```bash
-~/.config/omarchy/plugins/sjfortin.nts-radio/desktop/install-app.sh --remove
-omarchy plugin disable sjfortin.nts-radio
-rm -rf ~/.config/omarchy/plugins/sjfortin.nts-radio
-omarchy-shell shell rescanPlugins
-```
-
-Disabling stops playback and leaves nothing running. Outside its entry in
-`~/.config/omarchy/shell.json`, which `omarchy plugin disable` removes for you,
-the only thing the plugin writes is your library at
-`~/.local/state/omarchy/nts-radio/library.json`. That is left alone on removal,
-so reinstalling gets your saved shows back; delete it yourself if you want it
-gone.
+Disabling stops playback and leaves nothing running. Your library at
+`~/.local/state/omarchy/nts-radio/library.json` is left alone, so reinstalling
+gets your saved shows back. Delete it yourself if you want it gone.
 
 ## Troubleshooting
 
-**Nothing plays and the panel says "Stream unavailable".** Check that mpv is
-installed and can reach the stream:
+Start with `omarchy-shell nts-radio status`, which reports what the plugin
+believes about playback, dependencies and the schedule.
+
+**Nothing plays, "Stream unavailable".** Check mpv can reach the stream:
 
 ```bash
 mpv --no-video https://stream-relay-geo.ntslive.net/stream
 ```
 
-**An archived show will not play.** Live radio does not need `yt-dlp` but the
-archive does — `omarchy-shell nts-radio status` reports
-`"ytdlAvailable": false` when it is missing. If it is installed and a specific
-episode still fails, check whether the upload is still there:
+**An archived show will not play.** `status` reports `"ytdlAvailable": false`
+when `yt-dlp` is missing. If it is installed and one episode still fails, the
+upload may be gone:
 
 ```bash
 yt-dlp -f bestaudio --get-url "$(omarchy-shell nts-radio status | jq -r .archive.url)"
 ```
 
-An episode listed as *No audio* was never uploaded by NTS; there is nothing to
-play.
+**No devices under Output.** `"castAvailable": true` in `status` means the
+bridge loaded, and `omarchy-shell nts-radio devices` runs a discovery. Devices
+must be on the same network segment, since mDNS does not cross most VLANs or
+guest networks.
 
-**Search returns nothing for everything.** That is the `version=2` symptom
-described above, and would mean NTS changed the endpoint. `NtsApi.js` is the
+**Media keys do nothing.** Install `mpv-mpris` and check `"mpris": true`. Media
+keys only reach the plugin while it is playing.
+
+**Search returns nothing for everything.** NTS's `/search` requires
+`version=2`; without it the endpoint returns HTTP 200 and a permanently empty
+result set. If this happens, they changed the endpoint, and `NtsApi.js` is the
 file to look at.
 
-**No devices appear under Output.** Confirm the backend is present with
-`omarchy-shell nts-radio status` — `"castAvailable": true` means the bridge
-loaded. Then `omarchy-shell nts-radio devices` runs a discovery and prints what
-it found. Devices must be on the same network segment as this machine; mDNS
-does not cross most VLANs or guest networks.
+**Stale UI after editing the plugin.** Saving a file under
+`~/.config/omarchy/plugins/` reloads the plugin, but QML loaded by URL is
+cached for the life of the process. Run `omarchy restart shell`.
 
-**Media keys do nothing.** Install `mpv-mpris` and confirm
-`omarchy-shell nts-radio status` reports `"mpris": true`. Media keys only reach
-this plugin while it is actually playing; when it is stopped there is no player
-to control, and the keys fall through to whatever else is running.
+## How it is put together
 
-**The browser or panel looks stale after editing the plugin.** Saving a file
-under `~/.config/omarchy/plugins/` reloads the plugin, but QML files loaded by
-URL are cached for the life of the process. `omarchy restart shell` picks them
-up.
-
-**Playback state looks wrong.** `omarchy-shell nts-radio status` reports what
-the plugin believes; comparing it with mpv directly usually settles it:
-
-```bash
-echo '{"command":["get_property","time-pos"]}' \
-  | socat - "$XDG_RUNTIME_DIR/omarchy-nts-radio.mpv.sock"
+```
+Service.qml     shared state: schedule, playback mode, library, IPC
+Player.qml      the mpv child process and its JSON IPC socket
+Caster.qml      Chromecast playback and device discovery
+Api.qml         API client: queue, concurrency, retries, cache
+Fetcher.qml     one HTTP GET, in a subprocess
+Resolver.qml    turns an episode page into a URL a cast device can fetch
+Model.js        live schedule endpoints, parsing, sanitization
+NtsApi.js       archive endpoints: search, shows, episodes, tracklists
+Library.js      saved shows, episodes, resume positions
+scripts/cast.py the Chromecast bridge, newline JSON on stdin/stdout
+BarWidget.qml   the bar presence, and host for the panel popup
+Panel.qml       the bar panel
+Browser.qml     the browser window: routing, keyboard, layout
+pages/          Home, Search, Saved, Show, Episode
+components/     shared kit: cards, rows, tracklist, transport, rail
+desktop/        launcher entry, icon, installer
 ```
 
-**Your saved library looks wrong.** It is a plain file — read it, fix it, or
-delete it:
+Three rules hold it together.
 
-```bash
-cat ~/.local/state/omarchy/nts-radio/library.json
-```
+**One service owns playback.** `Service.qml` is created once by the shell, and
+the same object is handed to the bar widget and to the browser window. Neither
+owns the player, so opening or closing the browser cannot interrupt audio.
 
-Anything malformed in it is dropped on load rather than breaking the browser.
+**One client owns the network.** Pages never fetch. They ask `Api.qml` for a
+parsed result and get a callback.
+
+**The `.js` files are pure.** No QML types, no IO, no side effects. Every NTS
+URL, response shape and piece of sanitization lives in them, so they are the
+files to change when NTS changes something.
+
+There is no public NTS API. Everything here was worked out from the endpoints
+the nts.live player itself calls, so they are unversioned and can change
+without notice. The code comments carry the details.
 
 ## Notes
 
-This is an unofficial, unaffiliated client and is not endorsed by NTS. It does
-not include NTS's official logo assets — the station mark is a typographic
-stand-in drawn from your Omarchy theme's own two colours. It plays the same
-public streams and reads the same public endpoints the nts.live website does,
-with no borrowed credentials, and it deliberately does not use the
-Supporter-only tracklist timestamps those endpoints will hand out. Please support NTS at
-[nts.live/supporters](https://www.nts.live/supporters).
+Unofficial, unaffiliated, and not endorsed by NTS. It includes none of NTS's
+logo assets: the station mark is a typographic stand-in drawn from your Omarchy
+theme's own colours. It plays the same public streams and reads the same public
+endpoints the website does, with no borrowed credentials.
+
+Please support NTS at [nts.live/supporters](https://www.nts.live/supporters).
 
 ## License
 
