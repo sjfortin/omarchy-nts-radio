@@ -40,14 +40,17 @@ On Arch / Omarchy:
 omarchy pkg add mpv yt-dlp mpv-mpris python-pychromecast
 ```
 
-(or `sudo pacman -S --needed mpv yt-dlp mpv-mpris python-pychromecast`)
-
 Every one of those is in the official repos; nothing here needs the AUR. Each
 optional piece degrades quietly on its own: without `mpv-mpris` you lose media
 keys, without `python-pychromecast` the panel simply does not offer casting,
 without `yt-dlp` live radio still works and only the archive goes quiet, and
 without `mpv` the panel says so and points at the install command instead of
 failing with a stream error.
+
+The plugin itself needs no elevated privileges: nothing it runs requires sudo
+or pkexec, it writes only inside your own home directory, and it never edits
+system configuration. Installing the packages above is the only step that
+touches anything system-wide, and `omarchy pkg add` is what handles it.
 
 Why `yt-dlp` is needed for the archive is explained under
 [Archived shows](#archived-shows) — briefly, NTS does not host its own episode
