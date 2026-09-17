@@ -10,7 +10,7 @@ without losing earlier results.
 
 Artist/track matches link to the episode containing the track. Play episode
 fetches the episode's audio metadata, then plays or resumes the full episode;
-Save stores that episode. It does not play isolated tracks or jump to a track
+Save also fetches metadata so the saved episode retains its audio source. It does not play isolated tracks or jump to a track
 timestamp. Availability still depends on the episode's NTS audio source.
 
 Genre suggestions offer common spellings (for example, Rege → Reggae) without
@@ -21,6 +21,10 @@ counts across categories are matches, not unique playable episodes. Pagination
 retains the API wrapper's existing maximum offset of 5,000.
 
 ## Try locally
+
+Omarchy may retain cached QML components after a plugin hot reload. If the
+category tabs are missing or only six episodes appear, restart the shell once
+(`omarchy restart shell`), then reopen search. This briefly interrupts playback.
 
 ```sh
 omarchy-shell nts-radio open search
@@ -48,3 +52,18 @@ It tests request races, retry offsets, keyboard filtering, input synchronization
 track playback metadata, and rendering. Its preview is saved to
 `/tmp/nts-search-review.png`. Live API queries separately verified artist,
 genre, and second-page responses. Actual audio output remains a manual review.
+
+## Pre-merge review
+
+Fixed during review:
+
+- A pending track playback response could override a later episode selection.
+  Episode playback now invalidates earlier track requests.
+- Arriving results could clear or move the keyboard selection. It now stays
+  on the same result when an earlier section grows.
+- Saving a track match previously stored incomplete episode metadata. Saves
+  now fetch the episode, preserve its audio URL, prevent duplicate requests,
+  and allow retry after a failure.
+
+Regression checks cover these cases and click the actual Load more control,
+including its disabled loading state and disappearance after the last page.

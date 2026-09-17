@@ -29,7 +29,12 @@ TestCase {
     property var played: null
     property string archiveError: ""
     function isCurrentEpisode(episode) { return false }
-    function isEpisodeSaved(episode) { return false }
+    property var saved: []
+    function isEpisodeSaved(episode) { return saved.some(function(item) { return NtsApi.sameEpisode(item, episode) }) }
+    function toggleSaveEpisode(episode) {
+      if (isEpisodeSaved(episode)) saved = saved.filter(function(item) { return !NtsApi.sameEpisode(item, episode) })
+      else saved = saved.concat([episode])
+    }
     function isShowSaved(alias) { return false }
     function playEpisode(episode, at) { played = episode; return true }
   }
@@ -58,6 +63,7 @@ TestCase {
     fakeApi.requests = []
     fakeApi.playbackRequests = []
     fakeService.played = null
+    fakeService.saved = []
   }
 
   function test_staleRepeatedQuery() {
@@ -148,6 +154,89 @@ TestCase {
     image.save("/tmp/nts-search-review.png")
     page.chooseFilter("episodes")
     compare(page.cursorCount, 0)
+  }
+
+  function track() {
+    return { showAlias: "test", episodeAlias: "one", episodeName: "One", dateLabel: "", artworkSmall: "" }
+  }
+
+  function test_newEpisodePlayWinsOverPendingTrack() {
+    page.searchFor("reggae")
+    page.playTrack(track())
+    page.playEpisode(result("newer").episodes[0])
+    fakeApi.playbackRequests[0](result("one").episodes[0], true)
+    compare(fakeService.played.name, "newer")
+  }
+
+  function test_selectionSurvivesEarlierSectionArrival() {
+    page.searchFor("reggae")
+    request("episode").callback(result("selected"), true)
+    page.moveCursor(1)
+    compare(page.cursorTarget().item.name, "selected")
+    var matches = result("unused")
+    matches.episodes = []
+    var show = NtsApi.emptyShow()
+    show.alias = "host"
+    show.name = "Host"
+    matches.shows = [show]
+    request("show").callback(matches, true)
+    compare(page.cursor, 1)
+    compare(page.cursorTarget().kind, "episode")
+    compare(page.cursorTarget().item.name, "selected")
+  }
+
+  function test_saveTrackLoadsAudioAndDoesNotToggleTwice() {
+    page.searchFor("reggae")
+    page.saveTrack(track())
+    page.saveTrack(track())
+    compare(fakeApi.playbackRequests.length, 1)
+    compare(fakeService.saved.length, 0)
+    fakeApi.playbackRequests[0](result("one").episodes[0], true)
+    compare(fakeService.saved.length, 1)
+    verify(fakeService.saved[0].audioUrl !== "")
+    page.saveTrack(track())
+    compare(fakeService.saved.length, 0)
+    compare(fakeApi.playbackRequests.length, 1)
+  }
+
+  function test_saveFailureCanRetry() {
+    page.searchFor("reggae")
+    page.saveTrack(track())
+    fakeApi.playbackRequests[0](null, false)
+    compare(fakeService.saved.length, 0)
+    compare(page.savingTracks["test/one"], undefined)
+    verify(page.trackMessage.indexOf("Could not save") >= 0)
+    page.saveTrack(track())
+    fakeApi.playbackRequests[1](result("one").episodes[0], true)
+    compare(fakeService.saved.length, 1)
+  }
+
+  function test_loadMoreButton() {
+    page.searchFor("reggae")
+    page.chooseFilter("episodes")
+    var matches = result("first")
+    matches.episodes = []
+    for (var i = 0; i < 24; i++) matches.episodes.push(result("episode-" + i).episodes[0])
+    request("episode").callback(matches, true)
+    var button = findChild(page, "loadMoreEpisodes")
+    var scroller = findChild(page, "searchResults")
+    verify(button !== null)
+    verify(button.visible)
+    wait(50)
+    scroller.contentY = scroller.contentHeight - scroller.height
+    wait(50)
+    mouseClick(button, button.width / 2, button.height / 2)
+    compare(request("episode").offset, 24)
+    verify(!button.enabledAction)
+    var count = fakeApi.requests.length
+    page.loadGroup("episodes")
+    compare(fakeApi.requests.length, count)
+    var last = result("last")
+    last.received = 1
+    last.total = 25
+    request("episode").callback(last, true)
+    compare(page.episodes.length, 25)
+    verify(!button.visible)
   }
 
 }

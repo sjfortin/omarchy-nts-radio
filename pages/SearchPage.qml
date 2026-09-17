@@ -157,8 +157,7 @@ Item {
     if (!target || !service) return
     if (target.kind === "track") { playTrack(target.item); return }
     if (target.kind !== "episode") return
-    if (service.isCurrentEpisode(target.item)) service.togglePlayback()
-    else service.playEpisode(target.item, -1)
+    playEpisode(target.item)
   }
 
   function saveCursor() {
@@ -167,7 +166,45 @@ Item {
     if (target.kind === "episode") service.toggleSaveEpisode(target.item)
     else if (target.kind === "show") service.toggleSaveShow(target.item)
     else if (target.kind === "track" && target.item.showAlias && target.item.episodeAlias)
-      service.toggleSaveEpisode(episodeFromTrack(target.item))
+      saveTrack(target.item)
+  }
+
+  function playEpisode(episode) {
+    playRequest++
+    trackMessage = ""
+    if (!service) return
+    if (service.isCurrentEpisode(episode)) service.togglePlayback()
+    else if (!service.playEpisode(episode, -1)) trackMessage = service.archiveError
+  }
+
+  property var savingTracks: ({})
+
+  function saveTrack(track) {
+    if (!api || !service || !track.showAlias || !track.episodeAlias) return
+    var episode = episodeFromTrack(track)
+    var key = NtsApi.episodeKey(episode)
+    if (savingTracks[key]) return
+    if (service.isEpisodeSaved(episode)) {
+      service.toggleSaveEpisode(episode)
+      return
+    }
+    var token = generation
+    trackMessage = ""
+    var next = Object.assign({}, savingTracks)
+    next[key] = true
+    savingTracks = next
+    api.episode(track.showAlias, track.episodeAlias, function(result, ok) {
+      var pendingSaves = Object.assign({}, root.savingTracks)
+      delete pendingSaves[key]
+      root.savingTracks = pendingSaves
+      if (!ok || !result) {
+        if (token === root.generation) root.trackMessage = "Could not save episode. Try Save again."
+        return
+      }
+      // Saving remains intentional even if the user browses elsewhere while
+      // metadata loads. Do not toggle off a save made from another page.
+      if (!service.isEpisodeSaved(result)) service.toggleSaveEpisode(result)
+    })
   }
 
   property int playRequest: 0
@@ -312,8 +349,21 @@ Item {
         var updated = Object.assign({}, root.groups)
         updated[key] = Search.finishGroup(group, result, ok)
         if (ok && result) {
-          if (group.offset === 0) root.cursor = -1
+          // Earlier sections can grow while a later result is selected.
+          // Preserve that result, rather than the numeric index it occupied.
+          var selected = root.cursorTarget()
+          root.cursor = -1
           root[key] = Search.merge(root[key], result[key], key)
+          if (selected) {
+            var items = selected.kind === "show" ? root.shownShows
+              : selected.kind === "episode" ? root.shownEpisodes
+              : selected.kind === "track" ? root.shownTracks : root.shownTags
+            var index = items.indexOf(selected.item)
+            var offset = selected.kind === "show" ? 0
+              : selected.kind === "episode" ? root.episodesOffset
+              : selected.kind === "track" ? root.tracksOffset : root.tagsOffset
+            if (index >= 0) root.cursor = offset + index
+          }
           if (result.popular.length) root.popular = result.popular
         }
         root.groups = updated
@@ -402,9 +452,9 @@ Item {
       ink: root.ink
       dim: 0.42
       text: {
+        if (root.trackMessage !== "") return root.trackMessage
         if (root.searching) return "Searching…"
         if (root.query === "") return ""
-        if (root.trackMessage !== "") return root.trackMessage
         if (root.total > 0) return root.total + " matches across episodes, tracks, shows and tags"
         if (root.query !== "") return "Try an artist, track title, show or genre"
 
@@ -416,6 +466,7 @@ Item {
 
   Nts.Scroller {
     id: scroller
+    objectName: "searchResults"
     speedPercent: root.service ? root.service.scrollSpeed : 100
     onWheelObserved: function(pixelDelta, angleDelta) {
       if (root.service) root.service.noteWheel(pixelDelta, angleDelta)
@@ -582,14 +633,12 @@ Item {
             active: root.active
             ink: root.ink
             onOpened: root.episodeRequested(modelData)
-            onPlayed: {
-              if (root.service.isCurrentEpisode(modelData)) root.service.togglePlayback()
-              else root.service.playEpisode(modelData, -1)
-            }
+            onPlayed: root.playEpisode(modelData)
           }
         }
 
         Nts.BlockButton {
+          objectName: "loadMoreEpisodes"
           visible: root.canLoad("episodes")
           enabledAction: root.groups["episodes"] !== undefined && !root.groups["episodes"].loading
           label: root.groups["episodes"] && root.groups["episodes"].failed
@@ -675,10 +724,12 @@ Item {
                 onActivated: root.playTrack(trackRow.modelData)
               }
               Nts.BlockButton {
-                label: root.service && root.service.isEpisodeSaved(root.episodeFromTrack(trackRow.modelData))
+                readonly property bool saving: !!root.savingTracks[NtsApi.episodeKey(root.episodeFromTrack(trackRow.modelData))]
+                label: saving ? "Saving…" : root.service && root.service.isEpisodeSaved(root.episodeFromTrack(trackRow.modelData))
                   ? "Saved" : "Save"
+                enabledAction: !saving
                 ink: root.ink
-                onActivated: if (root.service) root.service.toggleSaveEpisode(root.episodeFromTrack(trackRow.modelData))
+                onActivated: root.saveTrack(trackRow.modelData)
               }
             }
 

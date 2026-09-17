@@ -1,0 +1,30 @@
+name: Search regression tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, improve-archive-search]
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Qt test runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript
+      - name: Test search parsing and pagination
+        run: node tests/search.test.cjs
+      - name: Test QML search interactions
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORMTHEME: basic
+          QT_QUICK_BACKEND: software
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests/qml -import tests/support
