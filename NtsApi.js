@@ -375,7 +375,7 @@ function parseTracklist(raw) {
 // everywhere else and stamps the group on it.
 
 function emptySearchResults() {
-  return { shows: [], episodes: [], tracks: [], tags: [], total: 0, popular: [] }
+  return { shows: [], episodes: [], tracks: [], tags: [], total: 0, received: 0, popular: [] }
 }
 
 function searchImage(image) {
@@ -404,6 +404,7 @@ function parseSearch(raw) {
 
   if (!Array.isArray(data.results)) return out
 
+  out.received = data.results.length
   for (var i = 0; i < data.results.length && i < 60; i++) {
     var row = data.results[i]
     if (!row || typeof row !== "object") continue
