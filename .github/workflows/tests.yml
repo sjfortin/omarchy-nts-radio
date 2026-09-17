@@ -1,0 +1,32 @@
+name: Search regression tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, improve-archive-search]
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # ArtFrame uses Image.retainWhileLoading, introduced in Qt 6.8.
+      - name: Install Qt test runtime
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+      - name: Test search parsing and pagination
+        run: node tests/search.test.cjs
+      - name: Test QML search interactions
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORMTHEME: basic
+          QT_QUICK_BACKEND: software
+        run: qmltestrunner -input tests/qml -import tests/support

@@ -7,9 +7,11 @@ Item {
   id: root
 
   property string text: ""
-  property string placeholder: "Search shows, hosts, tracks"
+  property string placeholder: "Search artists, tracks, shows or genres"
   property color ink: Color.foreground
   readonly property bool hasFocus: input.activeFocus
+
+  onTextChanged: if (input.text !== text) input.text = text
 
   signal edited(string value)
   signal submitted(string value)

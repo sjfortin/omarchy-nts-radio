@@ -32,9 +32,8 @@ omarchy pkg add mpv yt-dlp mpv-mpris python-pychromecast
 
 All four are in the official repos. Nothing here needs the AUR.
 
-The plugin needs no elevated privileges. Nothing it runs requires sudo or
-pkexec, it writes only inside your home directory, and it never edits system
-configuration.
+No sudo or pkexec is required. The plugin writes only inside your home
+directory and never edits system configuration.
 
 ## Install
 

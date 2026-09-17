@@ -3,17 +3,10 @@ import qs.Commons
 
 import "../components" as Nts
 import "../NtsApi.js" as NtsApi
+import "../Search.js" as Search
 
-// Search across shows, episodes, tracks and tags.
-//
-// NTS returns tracks and tags from different indexes than shows and episodes,
-// so this fires three requests per query rather than one and groups what comes
-// back. They resolve independently: a slow track index does not hold up the
-// show results, and a group that fails simply does not appear.
-//
-// Every response carries the query it was for. A fast typist outruns the
-// network, and without that check an early request landing late would replace
-// the results for what they are actually looking at now.
+// Independently paginated archive indexes. Request generations prevent stale
+// callbacks from replacing a newer search, including repeated queries.
 Item {
   id: root
 
@@ -31,7 +24,44 @@ Item {
   property var episodes: []
   property var tracks: []
   property var tags: []
-  property int total: 0
+  property var groups: ({})
+  property int generation: 0
+  property string filter: "all"
+  readonly property bool hasFocus: field.hasFocus
+  readonly property int total: Object.keys(groups).reduce(function(n, key) {
+    return n + groups[key].total
+  }, 0)
+  readonly property var suggestions: Search.genreSuggestions(query)
+
+  function nextTab() {
+    var tabs = ["all", "episodes", "tracks", "shows", "tags"]
+    chooseFilter(tabs[(tabs.indexOf(filter) + 1) % tabs.length])
+  }
+
+  function chooseFilter(value) {
+    filter = value
+    cursor = -1
+    scroller.contentY = 0
+  }
+
+  function searchFor(value) {
+    field.text = value
+    setQuery(value)
+    debounce.stop()
+    run()
+  }
+
+  function groupLabel(key) {
+    var group = groups[key]
+    if (!group) return ""
+    if (group.loading) return "Loading…"
+    return root[key].length + " of " + group.total
+  }
+
+  function canLoad(key) {
+    var group = groups[key]
+    return !!group && (group.failed || group.more)
+  }
   property var popular: []
 
   property int pending: 0
@@ -39,12 +69,10 @@ Item {
   // The query the currently displayed results belong to.
   property string resolvedQuery: ""
 
-  // The API returns shows and episodes mixed in one response, so the split
-  // between groups is made here rather than asked for. Each group shows a
-  // taste and names its full size, which is what keeps all four groups on
-  // screen together instead of burying tracks under thirty episodes.
-  readonly property var shownShows: shows.slice(0, 5)
-  readonly property var shownEpisodes: episodes.slice(0, 6)
+  readonly property var shownShows: filter === "all" || filter === "shows" ? shows : []
+  readonly property var shownEpisodes: filter === "all" || filter === "episodes" ? episodes : []
+  readonly property var shownTracks: filter === "all" || filter === "tracks" ? tracks : []
+  readonly property var shownTags: filter === "all" || filter === "tags" ? tags : []
 
   readonly property bool searching: pending > 0
   readonly property bool hasResults: shows.length > 0 || episodes.length > 0
@@ -68,8 +96,8 @@ Item {
 
   readonly property int episodesOffset: shownShows.length
   readonly property int tracksOffset: episodesOffset + shownEpisodes.length
-  readonly property int tagsOffset: tracksOffset + tracks.length
-  readonly property int cursorCount: tagsOffset + tags.length
+  readonly property int tagsOffset: tracksOffset + shownTracks.length
+  readonly property int cursorCount: tagsOffset + shownTags.length
 
   // -1 is a real position, not "unset": it means the caret is still in the
   // search field. Moving in and out of the results moves keyboard ownership
@@ -77,6 +105,10 @@ Item {
   // selection instead of being typed into the query.
   function moveCursor(delta) {
     if (cursorCount === 0) return
+    if (cursor === cursorCount - 1 && delta > 0 && filter !== "all" && canLoad(filter)) {
+      loadGroup(filter)
+      return
+    }
 
     // The first Down out of the field lands on the first result rather than
     // the second, which is what it looks like it should do.
@@ -99,8 +131,8 @@ Item {
     if (cursor < 0 || cursor >= cursorCount) return null
     if (cursor < episodesOffset) return { kind: "show", item: shownShows[cursor] }
     if (cursor < tracksOffset) return { kind: "episode", item: shownEpisodes[cursor - episodesOffset] }
-    if (cursor < tagsOffset) return { kind: "track", item: tracks[cursor - tracksOffset] }
-    return { kind: "tag", item: tags[cursor - tagsOffset] }
+    if (cursor < tagsOffset) return { kind: "track", item: shownTracks[cursor - tracksOffset] }
+    return { kind: "tag", item: shownTags[cursor - tagsOffset] }
   }
 
   function activateCursor() {
@@ -122,9 +154,10 @@ Item {
 
   function playCursor() {
     var target = cursorTarget()
-    if (!target || target.kind !== "episode" || !service) return
-    if (service.isCurrentEpisode(target.item)) service.togglePlayback()
-    else service.playEpisode(target.item, -1)
+    if (!target || !service) return
+    if (target.kind === "track") { playTrack(target.item); return }
+    if (target.kind !== "episode") return
+    playEpisode(target.item)
   }
 
   function saveCursor() {
@@ -132,6 +165,68 @@ Item {
     if (!target || !service) return
     if (target.kind === "episode") service.toggleSaveEpisode(target.item)
     else if (target.kind === "show") service.toggleSaveShow(target.item)
+    else if (target.kind === "track" && target.item.showAlias && target.item.episodeAlias)
+      saveTrack(target.item)
+  }
+
+  function playEpisode(episode) {
+    playRequest++
+    trackMessage = ""
+    if (!service) return
+    if (service.isCurrentEpisode(episode)) service.togglePlayback()
+    else if (!service.playEpisode(episode, -1)) trackMessage = service.archiveError
+  }
+
+  property var savingTracks: ({})
+
+  function saveTrack(track) {
+    if (!api || !service || !track.showAlias || !track.episodeAlias) return
+    var episode = episodeFromTrack(track)
+    var key = NtsApi.episodeKey(episode)
+    if (savingTracks[key]) return
+    if (service.isEpisodeSaved(episode)) {
+      service.toggleSaveEpisode(episode)
+      return
+    }
+    var token = generation
+    trackMessage = ""
+    var next = Object.assign({}, savingTracks)
+    next[key] = true
+    savingTracks = next
+    api.episode(track.showAlias, track.episodeAlias, function(result, ok) {
+      var pendingSaves = Object.assign({}, root.savingTracks)
+      delete pendingSaves[key]
+      root.savingTracks = pendingSaves
+      if (!ok || !result) {
+        if (token === root.generation) root.trackMessage = "Could not save episode. Try Save again."
+        return
+      }
+      // Saving remains intentional even if the user browses elsewhere while
+      // metadata loads. Do not toggle off a save made from another page.
+      if (!service.isEpisodeSaved(result)) service.toggleSaveEpisode(result)
+    })
+  }
+
+  property int playRequest: 0
+  property string trackMessage: ""
+
+  function playTrack(track) {
+    if (!api || !service || !track.showAlias || !track.episodeAlias) return
+    if (service.isCurrentEpisode(episodeFromTrack(track))) {
+      playRequest++
+      trackMessage = ""
+      service.togglePlayback()
+      return
+    }
+    var wanted = ++playRequest
+    trackMessage = "Loading episode…"
+    api.episode(track.showAlias, track.episodeAlias, function(result, ok) {
+      if (wanted !== root.playRequest) return
+      if (!ok || !result) { root.trackMessage = "Could not load episode. Try Play again."; return }
+      root.trackMessage = ""
+      if (service.isCurrentEpisode(result)) service.togglePlayback()
+      else if (!service.playEpisode(result, -1)) root.trackMessage = service.archiveError
+    })
   }
 
   // A track row knows which episode it was played on but not that episode's
@@ -148,6 +243,7 @@ Item {
       genres: [],
       artworkSmall: track.artworkSmall,
       artworkLarge: track.artworkSmall,
+      dateLabel: track.dateLabel,
       broadcastMs: 0,
       audioUrl: "",
       audioSource: "",
@@ -187,12 +283,20 @@ Item {
     episodes = []
     tracks = []
     tags = []
-    total = 0
+    groups = ({})
   }
 
   function setQuery(value) {
     var next = String(value || "").trim()
     if (next === query) return
+    generation++
+    playRequest++
+    trackMessage = ""
+    clearResults()
+    pending = 0
+    failed = false
+    resolvedQuery = ""
+    scroller.contentY = 0
     query = next
     if (next === "") {
       debounce.stop()
@@ -214,59 +318,62 @@ Item {
   }
 
   function run() {
+    debounce.stop()
     if (!api || query === "") return
-    var wanted = query
-    failed = false
-    pending = 3
-
-    function settle(forQuery) {
-      if (forQuery !== root.query) return false
-      root.pending = Math.max(0, root.pending - 1)
-      if (root.pending === 0) {
-        root.resolvedQuery = forQuery
-        root.failed = !root.hasResults && root.failedAll
-      }
-      return true
-    }
-
-    failedAll = true
-
-    api.search(wanted, NtsApi.SEARCH_TYPES, 12, 0, function(result, ok) {
-      if (root.query !== wanted) return
-      if (ok && result) {
-        root.failedAll = false
-        root.shows = result.shows
-        root.episodes = result.episodes
-        root.total = result.total
-        if (result.popular.length) root.popular = result.popular
-      }
-      settle(wanted)
-    })
-
-    api.search(wanted, NtsApi.SEARCH_TYPES_TRACK, 8, 0, function(result, ok) {
-      if (root.query !== wanted) return
-      if (ok && result) {
-        root.failedAll = false
-        root.tracks = result.tracks
-      }
-      settle(wanted)
-    })
-
-    api.search(wanted, NtsApi.SEARCH_TYPES_TAG, 8, 0, function(result, ok) {
-      if (root.query !== wanted) return
-      if (ok && result) {
-        root.failedAll = false
-        root.tags = result.tags
-      }
-      settle(wanted)
-    })
-
-    // The new query owns the view from this moment; stale rows would
-    // otherwise sit under a spinner belonging to something else.
+    generation++
+    playRequest++
+    trackMessage = ""
     clearResults()
+    pending = 0
+    failed = false
+    resolvedQuery = ""
+    scroller.contentY = 0
+    var initial = {}
+    for (var key in Search.types) initial[key] = Search.emptyGroup()
+    groups = initial
+    for (var name in Search.types) loadGroup(name)
   }
 
-  property bool failedAll: false
+  function loadGroup(key) {
+    var group = groups[key]
+    if (!api || !group || group.loading || (!group.more && !group.failed)) return
+    var token = generation
+    var wanted = query
+    var next = Object.assign({}, groups)
+    next[key] = Object.assign({}, group, { loading: true, failed: false })
+    groups = next
+    pending++
+    api.search(wanted, Search.types[key], key === "tags" ? 12 : 24, group.offset,
+      function(result, ok) {
+        if (token !== root.generation) return
+        var updated = Object.assign({}, root.groups)
+        updated[key] = Search.finishGroup(group, result, ok)
+        if (ok && result) {
+          // Earlier sections can grow while a later result is selected.
+          // Preserve that result, rather than the numeric index it occupied.
+          var selected = root.cursorTarget()
+          root.cursor = -1
+          root[key] = Search.merge(root[key], result[key], key)
+          if (selected) {
+            var items = selected.kind === "show" ? root.shownShows
+              : selected.kind === "episode" ? root.shownEpisodes
+              : selected.kind === "track" ? root.shownTracks : root.shownTags
+            var index = items.indexOf(selected.item)
+            var offset = selected.kind === "show" ? 0
+              : selected.kind === "episode" ? root.episodesOffset
+              : selected.kind === "track" ? root.tracksOffset : root.tagsOffset
+            if (index >= 0) root.cursor = offset + index
+          }
+          if (result.popular.length) root.popular = result.popular
+        }
+        root.groups = updated
+        root.pending = Math.max(0, root.pending - 1)
+        root.resolvedQuery = wanted
+        root.failed = !root.hasResults && Object.keys(updated).every(function(k) {
+          return updated[k].failed
+        })
+      })
+  }
 
   // Popular terms ride along on every search response, and NTS serves them for
   // an empty query too — so an untouched search page has something to offer.
@@ -278,7 +385,10 @@ Item {
   }
 
   Component.onCompleted: loadPopular()
-  onActiveChanged: if (active) { loadPopular(); field.focusInput() }
+  onActiveChanged: {
+    if (active) { loadPopular(); field.focusInput() }
+    else { playRequest++; trackMessage = "" }
+  }
 
   Column {
     id: header
@@ -302,9 +412,38 @@ Item {
           root.activateCursor()
           return
         }
-        debounce.stop()
-        root.setQuery(value)
-        root.run()
+        root.searchFor(value)
+      }
+    }
+
+    Flow {
+      width: parent.width
+      spacing: Style.space(8)
+      Repeater {
+        model: ["all", "episodes", "tracks", "shows", "tags"]
+        Nts.BlockButton {
+          required property string modelData
+          label: (modelData === "tracks" ? "Artist / track" : modelData)
+            + (root.groups[modelData] ? " · " + root.groups[modelData].total : "")
+          ink: root.ink
+          filled: root.filter === modelData
+          onActivated: root.chooseFilter(modelData)
+        }
+      }
+    }
+
+    Flow {
+      width: parent.width
+      spacing: Style.space(8)
+      visible: root.suggestions.length > 0
+      Repeater {
+        model: root.suggestions
+        Nts.BlockButton {
+          required property string modelData
+          label: "Try " + modelData
+          ink: root.ink
+          onActivated: root.searchFor(modelData)
+        }
       }
     }
 
@@ -313,9 +452,12 @@ Item {
       ink: root.ink
       dim: 0.42
       text: {
+        if (root.trackMessage !== "") return root.trackMessage
         if (root.searching) return "Searching…"
         if (root.query === "") return ""
-        if (root.total > 0) return root.total + " results"
+        if (root.total > 0) return root.total + " matches across episodes, tracks, shows and tags"
+        if (root.query !== "") return "Try an artist, track title, show or genre"
+
         return ""
       }
       visible: text !== ""
@@ -324,6 +466,7 @@ Item {
 
   Nts.Scroller {
     id: scroller
+    objectName: "searchResults"
     speedPercent: root.service ? root.service.scrollSpeed : 100
     onWheelObserved: function(pixelDelta, angleDelta) {
       if (root.service) root.service.noteWheel(pixelDelta, angleDelta)
@@ -395,15 +538,25 @@ Item {
       Column {
         width: parent.width
         spacing: Style.space(12)
-        visible: root.shows.length > 0
+        visible: root.query !== "" && (root.filter === "all" || root.filter === "shows")
 
         Nts.SectionHeader {
           width: parent.width
           title: "Shows"
           ink: root.ink
-          aside: root.shows.length > root.shownShows.length
-            ? root.shownShows.length + " of " + root.shows.length : ""
+          aside: root.groupLabel("shows")
         }
+
+        Nts.Caption {
+          width: parent.width
+          ink: root.ink
+          visible: root.groups["shows"] !== undefined
+            && !root.groups["shows"].loading
+            && (root.groups["shows"].failed || root.shows.length === 0)
+          text: root.groups["shows"] && root.groups["shows"].failed
+            ? "Could not load these matches. Retry below." : "No matches in this category"
+        }
+
 
         Grid {
           id: showGrid
@@ -430,6 +583,15 @@ Item {
             }
           }
         }
+
+        Nts.BlockButton {
+          visible: root.canLoad("shows")
+          enabledAction: root.groups["shows"] !== undefined && !root.groups["shows"].loading
+          label: root.groups["shows"] && root.groups["shows"].failed
+            ? "Retry shows" : "Load more shows"
+          ink: root.ink
+          onActivated: root.loadGroup("shows")
+        }
       }
 
       // ---- episodes
@@ -437,15 +599,25 @@ Item {
       Column {
         width: parent.width
         spacing: Style.space(8)
-        visible: root.episodes.length > 0
+        visible: root.query !== "" && (root.filter === "all" || root.filter === "episodes")
 
         Nts.SectionHeader {
           width: parent.width
           title: "Episodes"
           ink: root.ink
-          aside: root.episodes.length > root.shownEpisodes.length
-            ? root.shownEpisodes.length + " of " + root.episodes.length : ""
+          aside: root.groupLabel("episodes")
         }
+
+        Nts.Caption {
+          width: parent.width
+          ink: root.ink
+          visible: root.groups["episodes"] !== undefined
+            && !root.groups["episodes"].loading
+            && (root.groups["episodes"].failed || root.episodes.length === 0)
+          text: root.groups["episodes"] && root.groups["episodes"].failed
+            ? "Could not load these matches. Retry below." : "No matches in this category"
+        }
+
 
         Repeater {
           model: root.shownEpisodes
@@ -461,11 +633,18 @@ Item {
             active: root.active
             ink: root.ink
             onOpened: root.episodeRequested(modelData)
-            onPlayed: {
-              if (root.service.isCurrentEpisode(modelData)) root.service.togglePlayback()
-              else root.service.playEpisode(modelData, -1)
-            }
+            onPlayed: root.playEpisode(modelData)
           }
+        }
+
+        Nts.BlockButton {
+          objectName: "loadMoreEpisodes"
+          visible: root.canLoad("episodes")
+          enabledAction: root.groups["episodes"] !== undefined && !root.groups["episodes"].loading
+          label: root.groups["episodes"] && root.groups["episodes"].failed
+            ? "Retry episodes" : "Load more episodes"
+          ink: root.ink
+          onActivated: root.loadGroup("episodes")
         }
       }
 
@@ -473,22 +652,33 @@ Item {
       //
       // A track is not playable on its own — NTS indexes it as something that
       // was played on an episode — so a track row's action is to open that
-      // episode at the point it appears.
+      // episode. Play starts or resumes that episode, not an individual track.
 
       Column {
         width: parent.width
         spacing: Style.space(8)
-        visible: root.tracks.length > 0
+        visible: root.query !== "" && (root.filter === "all" || root.filter === "tracks")
 
         Nts.SectionHeader {
           width: parent.width
           title: "Tracks"
           ink: root.ink
-          aside: "Played on"
+          aside: root.groupLabel("tracks")
         }
 
+        Nts.Caption {
+          width: parent.width
+          ink: root.ink
+          visible: root.groups["tracks"] !== undefined
+            && !root.groups["tracks"].loading
+            && (root.groups["tracks"].failed || root.tracks.length === 0)
+          text: root.groups["tracks"] && root.groups["tracks"].failed
+            ? "Could not load these matches. Retry below." : "No matches in this category"
+        }
+
+
         Repeater {
-          model: root.tracks
+          model: root.shownTracks
 
           Item {
             id: trackRow
@@ -518,29 +708,36 @@ Item {
               anchors.fill: parent
               enabled: trackRow.linked
               cursorShape: Qt.PointingHandCursor
-              onClicked: root.episodeRequested({
-                kind: "episode",
-                showAlias: trackRow.modelData.showAlias,
-                episodeAlias: trackRow.modelData.episodeAlias,
-                name: trackRow.modelData.episodeName,
-                showName: "",
-                description: "",
-                location: "",
-                genres: [],
-                artworkSmall: trackRow.modelData.artworkSmall,
-                artworkLarge: trackRow.modelData.artworkSmall,
-                broadcastMs: 0,
-                audioUrl: "",
-                audioSource: "",
-                url: "",
-                valid: true
-              })
+              onClicked: root.episodeRequested(root.episodeFromTrack(trackRow.modelData))
+            }
+
+            Row {
+              id: trackActions
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(8)
+              visible: trackRow.linked
+              Nts.BlockButton {
+                label: root.service && root.service.isCurrentEpisode(root.episodeFromTrack(trackRow.modelData))
+                  && root.service.playing ? "Pause" : "Play episode"
+                ink: root.ink
+                onActivated: root.playTrack(trackRow.modelData)
+              }
+              Nts.BlockButton {
+                readonly property bool saving: !!root.savingTracks[NtsApi.episodeKey(root.episodeFromTrack(trackRow.modelData))]
+                label: saving ? "Saving…" : root.service && root.service.isEpisodeSaved(root.episodeFromTrack(trackRow.modelData))
+                  ? "Saved" : "Save"
+                enabledAction: !saving
+                ink: root.ink
+                onActivated: root.saveTrack(trackRow.modelData)
+              }
             }
 
             Column {
               id: trackText
               anchors.left: parent.left
-              anchors.right: parent.right
+              anchors.right: trackActions.left
+              anchors.rightMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(2)
 
@@ -571,6 +768,15 @@ Item {
             }
           }
         }
+
+        Nts.BlockButton {
+          visible: root.canLoad("tracks")
+          enabledAction: root.groups["tracks"] !== undefined && !root.groups["tracks"].loading
+          label: root.groups["tracks"] && root.groups["tracks"].failed
+            ? "Retry tracks" : "Load more tracks"
+          ink: root.ink
+          onActivated: root.loadGroup("tracks")
+        }
       }
 
       // ---- tags
@@ -581,25 +787,38 @@ Item {
       Column {
         width: parent.width
         spacing: Style.space(10)
-        visible: root.tags.length > 0
+        visible: root.query !== "" && (root.filter === "all" || root.filter === "tags")
 
         Nts.SectionHeader {
           width: parent.width
           title: "Tags"
+          aside: root.groupLabel("tags")
           ink: root.ink
         }
+
+        Nts.Caption {
+          width: parent.width
+          ink: root.ink
+          visible: root.groups["tags"] !== undefined
+            && !root.groups["tags"].loading
+            && (root.groups["tags"].failed || root.tags.length === 0)
+          text: root.groups["tags"] && root.groups["tags"].failed
+            ? "Could not load these matches. Retry below." : "No matches in this category"
+        }
+
 
         Flow {
           width: parent.width
           spacing: Style.space(8)
 
           Repeater {
-            model: root.tags
+            model: root.shownTags
 
             Nts.BlockButton {
               required property var modelData
               required property int index
               filled: root.cursor === root.tagsOffset + index
+              onFilledChanged: if (filled) root.ensureVisible(this)
               label: modelData.name
               ink: root.ink
               onActivated: {
@@ -610,6 +829,15 @@ Item {
               }
             }
           }
+        }
+
+        Nts.BlockButton {
+          visible: root.canLoad("tags")
+          enabledAction: root.groups["tags"] !== undefined && !root.groups["tags"].loading
+          label: root.groups["tags"] && root.groups["tags"].failed
+            ? "Retry tags" : "Load more tags"
+          ink: root.ink
+          onActivated: root.loadGroup("tags")
         }
       }
     }
