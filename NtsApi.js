@@ -477,6 +477,7 @@ function parseSearch(raw) {
         kind: "track",
         title: title,
         artist: artists.join(", "),
+        artists: artists,
         showAlias: aliases.showAlias,
         episodeAlias: aliases.episodeAlias,
         episodeName: Model.plainText(row.article && row.article.title, 120),
