@@ -16,7 +16,7 @@ timestamp. Availability still depends on the episode's NTS audio source.
 Genre suggestions offer common spellings (for example, Rege → Reggae) without
 changing the original query. These suggestions use a small local list, not a
 complete genre taxonomy or general artist spellchecker. Tags remain text
-searches, not strict genre filters. NTS controls relevance and result totals;
+searches, not strict genre filters. NTS supplies result totals;
 counts across categories are matches, not unique playable episodes. Pagination
 retains the API wrapper's existing maximum offset of 5,000.
 
@@ -67,3 +67,22 @@ Fixed during review:
 
 Regression checks cover these cases and click the actual Load more control,
 including its disabled loading state and disappearance after the last page.
+
+## Relevance ranking
+
+Search now ranks exact artist names first within Artist / track, followed by
+full phrases, all-word matches, and loose word matches. Shows, episodes and
+tags also rank full names ahead of partial matches. Case, spacing, common
+punctuation, accents and full-width characters are normalized. Ties retain
+upstream order, and new results preserve keyboard selection.
+
+Multiword track searches with fewer than six strong matches also look up the
+first meaningful query word (at most three pages of 40 candidates). Only
+candidates matching all query words are merged into the results. This does
+not change the input, the main query's offsets, or its Load more behavior.
+Supplementary lookup failures leave the normal results usable. Changing or
+clearing the query invalidates supplementary callbacks as well.
+
+This is a bounded relevance improvement, not a complete local NTS index or a
+general artist spellchecker. A match unavailable from the API or outside the
+candidate budget cannot be promoted. No additional library is required.

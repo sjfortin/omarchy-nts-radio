@@ -31,6 +31,66 @@ function merge(previous, incoming, kind) {
   return result
 }
 
+// Keep non-Latin letters; normalize presentation differences before scoring.
+function normalize(value) {
+  return String(value || "").normalize("NFKD").toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’']/g, "")
+    .replace(/[\u2000-\u206f\u3000-\u303f]/g, " ")
+    .replace(/[^a-z0-9\u00c0-\uffff]+/g, " ").trim().replace(/\s+/g, " ")
+}
+
+function fieldScore(value, query) {
+  var text = normalize(value)
+  if (!text || !query) return 0
+  if (text === query) return 1000
+  if ((" " + text + " ").indexOf(" " + query + " ") >= 0) return 800
+  var words = query.split(" ")
+  var matched = words.filter(function(word) {
+    return (" " + text + " ").indexOf(" " + word + " ") >= 0
+  }).length
+  if (matched === words.length) return 600
+  return Math.floor(200 * matched / words.length)
+}
+
+function score(item, kind, query) {
+  var q = normalize(query)
+  if (!q) return 0
+  if (kind === "tracks") {
+    var artists = item.artists || [item.artist]
+    var artist = artists.reduce(function(best, name) {
+      return Math.max(best, fieldScore(name, q))
+    }, 0)
+    // Exact artists lead exact titles; a full title still beats a partial artist.
+    return Math.max(artist ? artist + 50 : 0, fieldScore(item.title, q),
+      Math.min(600, fieldScore(item.artist + " " + item.title, q)))
+  }
+  return Math.max(fieldScore(item.name, q), fieldScore(item.description, q) / 4)
+}
+
+function rank(items, kind, query) {
+  return items.map(function(item, index) {
+    return { item: item, index: index, score: score(item, kind, query) }
+  }).sort(function(a, b) {
+    return b.score - a.score || a.index - b.index
+  }).map(function(entry) { return entry.item })
+}
+
+// Supplement the OR-like upstream search with a bounded candidate lookup.
+// Only full-query matches from this lookup are displayed.
+function candidateQuery(query) {
+  var words = normalize(query).split(" ")
+  if (words.length < 2) return ""
+  var stop = ["the", "and", "with", "from", "feat"]
+  for (var i = 0; i < words.length; i++)
+    if (words[i].length >= 3 && stop.indexOf(words[i]) < 0) return words[i]
+  return ""
+}
+
+function strongTracks(items, query) {
+  return items.filter(function(item) { return score(item, "tracks", query) >= 600 })
+}
+
 // Suggestions only: never silently replace the user's search. Common genres
 // also provide useful starting points when a short fragment misses NTS's index.
 var genres = ["Reggae", "Dub", "Dancehall", "Lovers Rock", "Ska", "Rocksteady",
@@ -68,4 +128,5 @@ function genreSuggestions(query) {
 
 if (typeof module !== "undefined")
   module.exports = { types: types, emptyGroup: emptyGroup, finishGroup: finishGroup,
-    merge: merge, genreSuggestions: genreSuggestions }
+    merge: merge, rank: rank, score: score, candidateQuery: candidateQuery,
+    strongTracks: strongTracks, genreSuggestions: genreSuggestions }

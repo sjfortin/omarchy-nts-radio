@@ -32,6 +32,7 @@ Item {
     return n + groups[key].total
   }, 0)
   readonly property var suggestions: Search.genreSuggestions(query)
+  readonly property int closeTrackCount: Search.strongTracks(tracks, query).length
 
   function nextTab() {
     var tabs = ["all", "episodes", "tracks", "shows", "tags"]
@@ -334,6 +335,39 @@ Item {
     for (var name in Search.types) loadGroup(name)
   }
 
+  function mergeResults(key, incoming) {
+    // Earlier sections can grow while a later result is selected.
+    // Preserve that result, rather than the numeric index it occupied.
+    var selected = root.cursorTarget()
+    root.cursor = -1
+    root[key] = Search.rank(Search.merge(root[key], incoming, key), key, root.query)
+    if (selected) {
+      var items = selected.kind === "show" ? root.shownShows
+        : selected.kind === "episode" ? root.shownEpisodes
+        : selected.kind === "track" ? root.shownTracks : root.shownTags
+      var index = items.indexOf(selected.item)
+      var offset = selected.kind === "show" ? 0
+        : selected.kind === "episode" ? root.episodesOffset
+        : selected.kind === "track" ? root.tracksOffset : root.tagsOffset
+      if (index >= 0) root.cursor = offset + index
+    }
+  }
+
+  function discoverTracks(token, wanted, term, offset, pages) {
+    if (token !== generation || !api) return
+    pending++
+    api.search(term, Search.types.tracks, 40, offset, function(result, ok) {
+      if (token !== root.generation) return
+      root.pending = Math.max(0, root.pending - 1)
+      if (!ok || !result) return
+      root.mergeResults("tracks", Search.strongTracks(result.tracks, wanted))
+      var next = offset + result.received
+      if (pages > 1 && result.received > 0 && next < result.total
+          && Search.strongTracks(root.tracks, wanted).length < 6)
+        root.discoverTracks(token, wanted, term, next, pages - 1)
+    })
+  }
+
   function loadGroup(key) {
     var group = groups[key]
     if (!api || !group || group.loading || (!group.more && !group.failed)) return
@@ -349,21 +383,7 @@ Item {
         var updated = Object.assign({}, root.groups)
         updated[key] = Search.finishGroup(group, result, ok)
         if (ok && result) {
-          // Earlier sections can grow while a later result is selected.
-          // Preserve that result, rather than the numeric index it occupied.
-          var selected = root.cursorTarget()
-          root.cursor = -1
-          root[key] = Search.merge(root[key], result[key], key)
-          if (selected) {
-            var items = selected.kind === "show" ? root.shownShows
-              : selected.kind === "episode" ? root.shownEpisodes
-              : selected.kind === "track" ? root.shownTracks : root.shownTags
-            var index = items.indexOf(selected.item)
-            var offset = selected.kind === "show" ? 0
-              : selected.kind === "episode" ? root.episodesOffset
-              : selected.kind === "track" ? root.tracksOffset : root.tagsOffset
-            if (index >= 0) root.cursor = offset + index
-          }
+          mergeResults(key, result[key])
           if (result.popular.length) root.popular = result.popular
         }
         root.groups = updated
@@ -372,6 +392,11 @@ Item {
         root.failed = !root.hasResults && Object.keys(updated).every(function(k) {
           return updated[k].failed
         })
+        if (key === "tracks" && group.offset === 0 && ok && result
+            && Search.strongTracks(root.tracks, wanted).length < 6) {
+          var term = Search.candidateQuery(wanted)
+          if (term) root.discoverTracks(token, wanted, term, 0, 3)
+        }
       })
   }
 
@@ -676,6 +701,17 @@ Item {
             ? "Could not load these matches. Retry below." : "No matches in this category"
         }
 
+
+        Nts.Caption {
+          objectName: "trackRelevance"
+          width: parent.width
+          ink: root.ink
+          visible: !root.searching && root.tracks.length > 0
+            && Search.candidateQuery(root.query) !== ""
+          text: root.closeTrackCount > 0
+            ? "Closest matches first · " + root.closeTrackCount + " close matches"
+            : "No close artist or track matches found yet. Showing broader matches."
+        }
 
         Repeater {
           model: root.shownTracks
