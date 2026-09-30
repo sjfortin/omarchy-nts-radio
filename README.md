@@ -64,6 +64,9 @@ to live radio from an archived show.
 Playback is not tied to the panel. Closing it, moving the widget, or opening a
 different bar panel all leave audio running.
 
+Starting local NTS playback pauses Crate without clearing its queue or position;
+starting Crate pauses local NTS playback. Casting to another device is unaffected.
+
 ## The browser window
 
 ```bash

@@ -374,6 +374,16 @@ Item {
   readonly property bool stopped: !playing && !loading
   readonly property string playbackError: castingAudio ? caster.lastError : player.lastError
 
+  // A newly playing local stream takes audio focus from Crate. Cast audio
+  // stays on its own device and does not interrupt music on this computer.
+  onPlayingChanged: if (playing && !castingAudio && !pauseCrate.running) pauseCrate.running = true
+
+  Process {
+    id: pauseCrate
+    running: false
+    command: ["omarchy-shell", "-q", "crate", "pause"]
+  }
+
   // Position and length, in seconds. Both are 0 for live, which has neither.
   readonly property real positionSec: !archiveMode ? 0
     : (castingAudio ? caster.positionSec : player.positionSec)
@@ -1024,6 +1034,9 @@ Item {
 
     function play(): void { root.play() }
     function pause(): void { root.pause() }
+    function pauseLocal(): void {
+      if (!root.castingAudio && (root.playing || root.loading)) root.pause()
+    }
     function toggle(): void { root.togglePlayback() }
     function next(): void { root.setChannel(root.channel === 1 ? 2 : 1) }
 
