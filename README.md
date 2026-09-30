@@ -66,6 +66,7 @@ different bar panel all leave audio running.
 
 Starting local NTS playback pauses Crate without clearing its queue or position;
 starting Crate pauses local NTS playback. Casting to another device is unaffected.
+NTS Radio works the same when Crate is not installed.
 
 ## The browser window
 
