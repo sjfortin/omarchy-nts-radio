@@ -373,6 +373,33 @@ Item {
     || (castingAudio ? caster.loading : player.loading)
   readonly property bool stopped: !playing && !loading
   readonly property string playbackError: castingAudio ? caster.lastError : player.lastError
+  property real localPlaybackStartedAt: 0
+  property real queuedClaimAt: 0
+  property real sentClaimAt: 0
+
+  // A newly playing local stream takes audio focus from Crate. Cast audio
+  // stays on its own device and does not interrupt music on this computer.
+  onPlayingChanged: if (playing && !castingAudio) claimLocalAudio()
+  onCastingAudioChanged: if (!castingAudio && playing) claimLocalAudio()
+
+  function claimLocalAudio() {
+    localPlaybackStartedAt = Date.now()
+    queuedClaimAt = localPlaybackStartedAt
+    sendAudioClaim()
+  }
+
+  function sendAudioClaim() {
+    if (pauseCrate.running || queuedClaimAt <= sentClaimAt) return
+    sentClaimAt = queuedClaimAt
+    pauseCrate.command = ["omarchy-shell", "-q", "crate", "pauseBefore", String(sentClaimAt)]
+    pauseCrate.running = true
+  }
+
+  Process {
+    id: pauseCrate
+    running: false
+    onExited: root.sendAudioClaim()
+  }
 
   // Position and length, in seconds. Both are 0 for live, which has neither.
   readonly property real positionSec: !archiveMode ? 0
@@ -1024,6 +1051,14 @@ Item {
 
     function play(): void { root.play() }
     function pause(): void { root.pause() }
+    function pauseLocal(): void {
+      if (!root.castingAudio && (root.playing || root.loading)) root.pause()
+    }
+    function pauseLocalBefore(stamp: string): void {
+      // A same-millisecond tie goes to Crate.
+      if (!root.castingAudio && (root.playing || root.loading)
+          && Number(stamp) >= root.localPlaybackStartedAt) root.pause()
+    }
     function toggle(): void { root.togglePlayback() }
     function next(): void { root.setChannel(root.channel === 1 ? 2 : 1) }
 
