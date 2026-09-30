@@ -46,3 +46,24 @@ test('URLs preserve spelling, encode query syntax and separate indexes and pages
   assert.equal(url.searchParams.get('offset'), '24');
   assert.equal(url.searchParams.get('version'), '2');
 });
+
+test('full artist and phrase matches outrank loose words without mutating results', () => {
+  const loose = { artist: 'Horseman', title: 'Light' };
+  const phrase = { artist: 'Other', title: 'Bonny Light Horseman live' };
+  const exact = { artist: 'Bonny Light Horseman', title: 'Deep In Love' };
+  const all = { artist: 'Horseman Light Bonny', title: 'Other' };
+  const input = [loose, all, phrase, exact];
+  assert.deepEqual(Search.rank(input, 'tracks', 'Bonny Light horseman'), [exact, phrase, all, loose]);
+  assert.equal(input[0], loose);
+  assert.deepEqual(Search.strongTracks(input, 'Bonny Light Horseman'), [all, phrase, exact]);
+});
+
+test('ranking normalizes accents, punctuation and spacing and preserves ties', () => {
+  const a = { name: 'BÓNＮY—Light Horseman' };
+  const b = { name: 'Bonny Light Horseman' };
+  assert.deepEqual(Search.rank([a, b], 'shows', ' bonny   LIGHT horseman '), [a, b]);
+  assert.ok(Search.score({ artist: 'Delight', title: '' }, 'tracks', 'light') < 600);
+  assert.ok(Search.score({ artists: ['Other', 'Bonny Light Horseman'], title: 'Song' }, 'tracks', 'Bonny Light Horseman') > 1000);
+  assert.equal(Search.candidateQuery('The Bonny Light Horseman'), 'bonny');
+  assert.equal(Search.candidateQuery('reggae'), '');
+});

@@ -66,6 +66,54 @@ TestCase {
     fakeService.saved = []
   }
 
+  function trackResult(artist, title, alias) {
+    return { shows: [], episodes: [], tags: [], popular: [], total: 500, received: 40,
+      tracks: [{ artist: artist, title: title, showAlias: "test", episodeAlias: alias,
+        episodeName: alias, artworkSmall: "", dateLabel: "" }] }
+  }
+
+  function test_discoveryRankingAndCursor() {
+    page.searchFor("Bonny Light Horseman")
+    request("track").callback(trackResult("Horseman", "Light", "loose"), true)
+    compare(request("track").query, "bonny")
+    page.chooseFilter("tracks")
+    page.cursor = 0
+    request("track").callback(trackResult("Bonny Light Horseman", "Deep In Love", "exact"), true)
+    compare(page.tracks[0].artist, "Bonny Light Horseman")
+    compare(page.cursor, 1)
+    compare(page.groups.tracks.offset, 40)
+    compare(request("track").offset, 40)
+    var stale = request("track")
+    page.searchFor("jazz")
+    stale.callback(trackResult("Bonny Light Horseman", "Other", "stale"), true)
+    compare(page.tracks.length, 0)
+    compare(page.pending, 4)
+  }
+
+  function test_discoveryBoundAndFailure() {
+    page.searchFor("Bonny Light Horseman")
+    request("track").callback(trackResult("Horseman", "Light", "loose"), true)
+    for (var i = 0; i < 3; i++) {
+      compare(request("track").offset, i * 40)
+      request("track").callback(trackResult("Other", "Light", "weak" + i), true)
+    }
+    compare(fakeApi.requests.length, 7)
+    compare(page.tracks.length, 1)
+    compare(page.pending, 3)
+    request("show").callback(result("unused"), true)
+    request("episode").callback(result("unused"), true)
+    request("tag").callback(result("unused"), true)
+    var relevance = findChild(page, "trackRelevance")
+    verify(relevance.visible)
+    verify(relevance.text.indexOf("Showing broader matches") >= 0)
+    page.searchFor("Bonny Light Horseman")
+    request("track").callback(trackResult("Horseman", "Light", "loose"), true)
+    request("track").callback(null, false)
+    compare(page.tracks.length, 1)
+    compare(page.groups.tracks.failed, false)
+    compare(page.pending, 3)
+  }
+
   function test_staleRepeatedQuery() {
     page.searchFor("reggae")
     var old = request("episode")
