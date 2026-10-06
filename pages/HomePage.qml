@@ -33,31 +33,39 @@ Item {
   property bool loadingDiscover: false
   property bool discoverFailed: false
 
-  // Fetched once per window, then served from the API cache. The home page is
-  // returned to constantly while navigating, and re-requesting NTS's editorial
-  // rails on every visit would be rude and slow.
+  // Refresh editorial shelves on a return after five minutes. Short trips
+  // between pages use the API cache and keep the current layout stable.
   property bool requested: false
+  property double lastFetchedAt: 0
+  property int discoveryRequest: 0
 
   function load(force) {
     if (!api) return
-    if (requested && force !== true) return
+    if (loadingDiscover && force !== true) return
+    if (requested && force !== true && Date.now() - lastFetchedAt < 300000) return
     requested = true
     loadingDiscover = true
     discoverFailed = false
+    var token = ++discoveryRequest
 
     var outstanding = 2
     function done() {
+      if (token !== root.discoveryRequest) return
       outstanding--
       if (outstanding > 0) return
       loadingDiscover = false
       discoverFailed = root.picks.length === 0 && root.recent.length === 0
+      requested = !discoverFailed
+      lastFetchedAt = Date.now()
     }
 
     api.collection("picks", 8, function(result, ok) {
+      if (token !== root.discoveryRequest) return
       if (ok && result) root.picks = result.episodes
       done()
     })
     api.collection("recent", 8, function(result, ok) {
+      if (token !== root.discoveryRequest) return
       if (ok && result) root.recent = result.episodes
       done()
     })
@@ -66,7 +74,14 @@ Item {
   function reload() { load(true) }
 
   Component.onCompleted: load(false)
-  onActiveChanged: if (active) load(false)
+  onActiveChanged: if (active && !loadingDiscover) load(false)
+
+  Timer {
+    interval: 300000
+    repeat: true
+    running: root.active
+    onTriggered: root.load(false)
+  }
 
   // "Continue listening" is the resume shelf, newest first. Library.js already
   // drops entries that finished or never really started.

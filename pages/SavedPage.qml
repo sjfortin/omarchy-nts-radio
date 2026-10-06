@@ -30,15 +30,23 @@ Item {
   readonly property var library: service ? service.library : null
   readonly property var shows: library ? library.shows : []
   readonly property var episodes: library ? library.episodes : []
+  property int showLimit: 48
+  property int episodeLimit: 80
+  readonly property var visibleShows: shows.slice(0, showLimit)
+  readonly property var visibleEpisodes: episodes.slice(0, episodeLimit)
 
   // ---- keyboard cursor over whichever tab is showing.
   property int cursor: -1
-  readonly property var cursorItems: tab === "shows" ? shows : episodes
+  readonly property var cursorItems: tab === "shows" ? visibleShows : visibleEpisodes
   readonly property int cursorCount: cursorItems.length
 
   function moveCursor(delta) {
     if (cursorCount === 0) return
     var next = cursor < 0 ? (delta > 0 ? 0 : cursorCount - 1) : cursor + delta
+    if (next >= cursorCount && delta > 0) {
+      if (tab === "shows" && showLimit < shows.length) showLimit += 48
+      else if (tab === "episodes" && episodeLimit < episodes.length) episodeLimit += 80
+    }
     cursor = Math.max(0, Math.min(cursorCount - 1, next))
   }
 
@@ -79,6 +87,16 @@ Item {
     var target = 175
     var columns = Math.round((available + spacing) / (target + spacing))
     return Math.max(2, Math.min(8, columns))
+  }
+
+  function nearViewport(item) {
+    if (!item) return false
+    // Keep one viewport of artwork ahead of the scroll position. The delegates
+    // can exist without making a network request for distant covers.
+    var top = item.mapToItem(content, 0, 0).y
+    var margin = scroller.height
+    return top + item.height >= scroller.contentY - margin
+      && top <= scroller.contentY + scroller.height + margin
   }
 
   function ensureVisible(item) {
@@ -186,7 +204,7 @@ Item {
         visible: root.tab === "shows" && root.shows.length > 0
 
         Repeater {
-          model: root.tab === "shows" ? root.shows : []
+          model: root.tab === "shows" ? root.visibleShows : []
 
           Nts.ShowCard {
             required property var modelData
@@ -197,12 +215,19 @@ Item {
             item: modelData
             isShow: true
             service: root.service
-            active: root.active
+            active: root.active && root.nearViewport(this)
             ink: root.ink
             subtitle: modelData.location
             onOpened: root.showRequested(modelData.alias)
           }
         }
+      }
+
+      Nts.BlockButton {
+        visible: root.tab === "shows" && root.showLimit < root.shows.length
+        label: "Show more shows"
+        ink: root.ink
+        onActivated: root.showLimit += 48
       }
 
       Column {
@@ -211,7 +236,7 @@ Item {
         visible: root.tab === "episodes" && root.episodes.length > 0
 
         Repeater {
-          model: root.tab === "episodes" ? root.episodes : []
+          model: root.tab === "episodes" ? root.visibleEpisodes : []
 
           Nts.EpisodeRow {
             required property var modelData
@@ -221,7 +246,7 @@ Item {
             width: content.width
             episode: modelData
             service: root.service
-            active: root.active
+            active: root.active && root.nearViewport(this)
             ink: root.ink
             progress: Library.resumeFraction(
               Library.resumeFor(root.library, modelData) || {})
@@ -232,6 +257,13 @@ Item {
             }
           }
         }
+      }
+
+      Nts.BlockButton {
+        visible: root.tab === "episodes" && root.episodeLimit < root.episodes.length
+        label: "Show more episodes"
+        ink: root.ink
+        onActivated: root.episodeLimit += 80
       }
     }
   }

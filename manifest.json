@@ -74,12 +74,12 @@
       {
         "key": "volume",
         "type": "integer",
-        "label": "Playback volume",
+        "label": "Cast volume",
         "min": 0,
         "max": 100,
         "step": 5,
         "defaultValue": 70,
-        "description": "Volume of the NTS stream itself, independent of the system volume."
+        "description": "Remembered Chromecast volume. Local playback follows the system output volume."
       },
       {
         "key": "refreshMinutes",

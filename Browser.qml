@@ -236,7 +236,9 @@ Item {
         }
 
         if (event.modifiers & Qt.ControlModifier) {
-          if (event.key === Qt.Key_F) {
+          if (event.key === Qt.Key_Tab) {
+            if (root.pageCall("nextTab")) event.accepted = true
+          } else if (event.key === Qt.Key_F) {
             root.navigate("search")
             event.accepted = true
           } else if (event.key === Qt.Key_W) {
@@ -267,13 +269,6 @@ Item {
         if (event.key === Qt.Key_PageUp) {
           root.pageCall("moveCursor", -5)
           event.accepted = true
-          return
-        }
-
-        // Tab switches between a page's own sub-views where it has any (the
-        // saved shelves); pages without a nextTab() ignore it.
-        if (event.key === Qt.Key_Tab) {
-          if (root.pageCall("nextTab")) event.accepted = true
           return
         }
 

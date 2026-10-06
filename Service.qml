@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.Pipewire
 
 import "Model.js" as Model
 import "NtsApi.js" as NtsApi
@@ -41,8 +42,80 @@ Item {
   // widget has reported in.
 
   property int channel: 1
+  // The displayed level follows the active output. Local playback uses the
+  // system output sink; a Chromecast keeps its own remembered level.
   property int volume: 70
+  property int castVolume: 70
   property int refreshMinutes: 1
+
+  // Match Omarchy's Audio panel and volume keys: a processing sink can front
+  // the real speaker, so resolve the selected output to the physical sink.
+  readonly property var defaultSink: Pipewire.defaultAudioSink
+  readonly property var audioNodes: Pipewire.nodes ? Pipewire.nodes.values : []
+  readonly property var trackedSinks: {
+    var list = []
+    for (var i = 0; i < audioNodes.length; i++) {
+      var node = audioNodes[i]
+      if (node && node.isSink && !node.isStream) list.push(node)
+    }
+    if (defaultSink && list.indexOf(defaultSink) < 0) list.push(defaultSink)
+    return list
+  }
+  property string volumeSinkName: ""
+  readonly property var volumeSink: {
+    if (!defaultSink || volumeSinkName === ""
+        || String(defaultSink.name) === volumeSinkName) return defaultSink
+    for (var i = 0; i < trackedSinks.length; i++) {
+      var node = trackedSinks[i]
+      if (node && String(node.name) === volumeSinkName && node.audio) return node
+    }
+    return defaultSink
+  }
+
+  function resolveVolumeSink() {
+    if (!volumeSinkProc.running) volumeSinkProc.running = true
+  }
+
+  function syncOutputVolume() {
+    if (castingAudio) {
+      volume = caster.volume
+    } else if (volumeSink && volumeSink.audio) {
+      volume = Model.clampVolume(volumeSink.audio.volume * 100)
+      if (player.volume !== 100) player.setVolume(100)
+    } else {
+      volume = player.volume
+    }
+  }
+
+  onDefaultSinkChanged: {
+    volumeSinkName = ""
+    resolveVolumeSink()
+  }
+  onVolumeSinkChanged: syncOutputVolume()
+
+  PwObjectTracker { objects: root.trackedSinks }
+
+  Connections {
+    target: root.volumeSink && root.volumeSink.audio ? root.volumeSink.audio : null
+    function onVolumeChanged() { root.syncOutputVolume() }
+  }
+
+  Process {
+    id: volumeSinkProc
+    command: ["omarchy-audio-output-sink"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.volumeSinkName = String(text || "").trim()
+    }
+  }
+
+  Timer {
+    interval: 15000
+    repeat: true
+    running: true
+    triggeredOnStart: true
+    onTriggered: root.resolveVolumeSink()
+  }
 
   // Scroll distance in the browser window, as a percentage. Lives here rather
   // than in the browser because the browser is destroyed on close and this has
@@ -118,10 +191,8 @@ Item {
     }
     if (values.volume !== undefined) {
       var wantedVolume = Model.clampVolume(values.volume)
-      if (wantedVolume !== volume) {
-        volume = wantedVolume
-        player.setVolume(wantedVolume)
-      }
+      castVolume = wantedVolume
+      caster.setVolume(wantedVolume)
     }
     if (values.refreshMinutes !== undefined)
       refreshMinutes = Math.max(1, Math.min(30, Math.floor(Number(values.refreshMinutes)) || 1))
@@ -137,8 +208,8 @@ Item {
     // the *last* session was doing, which adoptSettings uses to decide whether
     // a cast is worth asking about — it is not a starting output.
     if (values.output !== undefined) lastSessionOutput = Model.outputModeFromSetting(values.output)
-    player.volume = volume
-    caster.volume = volume
+    player.volume = 100
+    syncOutputVolume()
     applyingSettings = false
   }
 
@@ -146,7 +217,7 @@ Item {
   function persistableSettings() {
     return {
       channel: Model.channelSettingValue(channel),
-      volume: Model.clampVolume(volume),
+      volume: Model.clampVolume(castVolume),
       scrollSpeed: scrollSpeed,
       output: outputMode,
       castDevice: castUuid,
@@ -380,7 +451,10 @@ Item {
   // A newly playing local stream takes audio focus from Crate. Cast audio
   // stays on its own device and does not interrupt music on this computer.
   onPlayingChanged: if (playing && !castingAudio) claimLocalAudio()
-  onCastingAudioChanged: if (!castingAudio && playing) claimLocalAudio()
+  onCastingAudioChanged: {
+    syncOutputVolume()
+    if (!castingAudio && playing) claimLocalAudio()
+  }
 
   function claimLocalAudio() {
     localPlaybackStartedAt = Date.now()
@@ -617,11 +691,21 @@ Item {
 
   function setVolume(value) {
     var wanted = Model.clampVolume(value)
-    if (wanted === volume) return
-    volume = wanted
-    if (castingAudio) caster.setVolume(wanted)
-    else player.setVolume(wanted)
-    volumePersist.restart()
+    if (castingAudio) {
+      if (wanted === castVolume && wanted === volume) return
+      castVolume = wanted
+      volume = wanted
+      caster.setVolume(wanted)
+      volumePersist.restart()
+    } else if (volumeSink && volumeSink.audio) {
+      if (wanted === volume && wanted === Math.round(volumeSink.audio.volume * 100)) return
+      volumeSink.audio.volume = wanted / 100
+      volume = wanted
+    } else {
+      // During PipeWire startup, keep the control usable until a sink appears.
+      player.setVolume(wanted)
+      volume = wanted
+    }
   }
 
   // Moving the audio between this machine and a device. Playback follows the
@@ -679,7 +763,7 @@ Item {
   function castToLocal() { setOutput("local", "", "") }
   function discoverCastDevices() { caster.discover() }
 
-  // Dragging a slider should not write shell.json on every frame.
+  // Dragging the cast slider should not write shell.json on every frame.
   Timer {
     id: volumePersist
     interval: 800
@@ -917,8 +1001,9 @@ Item {
 
     // A device can be adjusted from the Home app or its own touch controls.
     function onVolumeChanged() {
-      if (!root.casting || root.volume === caster.volume) return
-      root.volume = caster.volume
+      if (root.castVolume === caster.volume && (!root.castingAudio || root.volume === caster.volume)) return
+      root.castVolume = caster.volume
+      if (root.castingAudio) root.volume = caster.volume
       volumePersist.restart()
     }
 
@@ -1003,13 +1088,14 @@ Item {
     // Playback state changes what the refresh cadence should be.
     function onWantedChanged() { root.scheduleNextRefresh() }
 
-    // mpv is also volume-controllable from outside (playerctl, pavucontrol's
-    // stream slider does not reach it, but an MPRIS client does). Follow it
-    // rather than fighting it.
+    // MPRIS can change mpv's stream volume directly. Treat that as a request
+    // for system volume, then restore the stream to unity gain.
     function onVolumeChanged() {
-      if (root.volume === player.volume) return
-      root.volume = player.volume
-      volumePersist.restart()
+      if (root.castingAudio || player.volume === 100) return
+      if (root.volumeSink && root.volumeSink.audio) {
+        root.setVolume(player.volume)
+        player.setVolume(100)
+      } else root.volume = player.volume
     }
   }
 

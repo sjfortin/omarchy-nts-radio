@@ -576,7 +576,7 @@ Item {
           id: volumeLabel
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "Vol"
+          text: root.service && root.service.castingAudio ? "Cast" : "System"
           dim: 0.5
         }
 

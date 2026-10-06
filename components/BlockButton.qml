@@ -15,12 +15,25 @@ Rectangle {
 
   signal activated()
 
+  activeFocusOnTab: visible && enabledAction
+  Accessible.role: Accessible.Button
+  Accessible.name: label
+
+  Keys.onPressed: function(event) {
+    if (!root.enabledAction) return
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+        || event.key === Qt.Key_Space) {
+      root.activated()
+      event.accepted = true
+    }
+  }
+
   radius: 0
   implicitWidth: buttonLabel.implicitWidth + horizontalPadding * 2
   implicitHeight: Math.max(Style.space(26), buttonLabel.implicitHeight + Style.space(12))
   color: filled ? ink : (hover.hovered && enabledAction ? Util.alpha(ink, 0.12) : "transparent")
-  border.width: 1
-  border.color: Util.alpha(ink, filled ? 1.0 : 0.42)
+  border.color: Util.alpha(ink, filled || activeFocus ? 1.0 : 0.42)
+  border.width: activeFocus ? 2 : 1
   opacity: enabledAction ? 1.0 : 0.35
 
   Behavior on color {

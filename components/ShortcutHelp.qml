@@ -37,14 +37,14 @@ Item {
       rows: [
         ["J  K   ↓  ↑", "Move down / up"],
         ["PgDn  PgUp", "Five at a time"],
-        ["Tab", "Switch shelf, on Saved"],
+        ["Ctrl Tab", "Switch result group or shelf"],
         ["Enter", "Open what is selected"]
       ]
     },
     {
       title: "Listening",
       rows: [
-        ["Space", "Play or pause"],
+        ["Space", "Play / pause or focused control"],
         ["P", "Play what is selected"],
         ["B", "Save what is selected"],
         ["1  2", "Live NTS 1 / NTS 2"],

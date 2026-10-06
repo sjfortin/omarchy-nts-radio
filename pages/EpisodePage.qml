@@ -42,6 +42,9 @@ Item {
   property bool loadingTracks: false
   property bool tracksFailed: false
   property bool detailLoaded: false
+  property bool detailFailed: false
+  property bool loadingDetail: false
+  property int detailRequest: 0
 
   readonly property bool saved: service && episode ? service.isEpisodeSaved(episode) : false
   readonly property bool isCurrent: service && episode ? service.isCurrentEpisode(episode) : false
@@ -95,18 +98,16 @@ Item {
     tracks = []
     tracksFailed = false
     detailLoaded = false
+    detailFailed = false
+    loadingDetail = false
+    detailRequest++
     if (!api || !episode || !episode.showAlias || !episode.episodeAlias) return
 
     var show = episode.showAlias
     var slot = episode.episodeAlias
 
     // Fill in whatever the calling row did not have.
-    api.episode(show, slot, function(result, ok) {
-      if (!root.episode || root.episode.showAlias !== show
-        || root.episode.episodeAlias !== slot) return
-      root.detailLoaded = true
-      if (ok && result) root.episode = result
-    })
+    fetchDetails(show, slot)
 
     if (!episode.showName) {
       api.show(show, function(result, ok) {
@@ -121,13 +122,27 @@ Item {
         || root.episode.episodeAlias !== slot) return
       root.loadingTracks = false
       if (!ok || !result) {
-        // Plenty of episodes genuinely have no tracklist. That is an absence,
-        // not a failure, so it gets no error treatment — the section is simply
-        // not there.
+        // Plenty of episodes genuinely have no tracklist.
         root.tracksFailed = false
         return
       }
       root.tracks = result
+    })
+  }
+
+  function fetchDetails(show, slot) {
+    if (!api) return
+    var request = ++detailRequest
+    loadingDetail = true
+    detailFailed = false
+    api.episode(show, slot, function(result, ok) {
+      if (request !== root.detailRequest) return
+      if (!root.episode || root.episode.showAlias !== show
+        || root.episode.episodeAlias !== slot) return
+      root.loadingDetail = false
+      root.detailFailed = !ok || !result
+      root.detailLoaded = !root.detailFailed
+      if (!root.detailFailed) root.episode = result
     })
   }
 
@@ -225,13 +240,23 @@ Item {
 
             Text {
               id: showLink
+              activeFocusOnTab: visible
+              Accessible.role: Accessible.Link
+              Accessible.name: root.showLabel
+              Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                    || event.key === Qt.Key_Space) {
+                  root.showRequested(root.episode.showAlias)
+                  event.accepted = true
+                }
+              }
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
               text: root.showLabel
               color: Util.alpha(root.ink, showLinkHover.hovered ? 1.0 : 0.75)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
-              font.underline: showLinkHover.hovered
+              font.underline: showLinkHover.hovered || activeFocus
 
               HoverHandler { id: showLinkHover }
 
@@ -316,6 +341,7 @@ Item {
             visible: text !== ""
             text: {
               if (!root.episode) return ""
+              if (root.detailFailed) return "Could not update episode details"
               if (root.hasAudio) {
                 if (root.service && !root.service.ytdlAvailable)
                   return "yt-dlp is not installed — omarchy pkg add yt-dlp"
@@ -324,6 +350,14 @@ Item {
               return root.detailLoaded
                 ? "NTS has no audio for this broadcast" : "Checking for audio…"
             }
+          }
+
+          Nts.BlockButton {
+            visible: root.detailFailed
+            label: "Try again"
+            ink: root.ink
+            onActivated: if (root.episode) root.fetchDetails(root.episode.showAlias,
+              root.episode.episodeAlias)
           }
 
           Nts.Caption {

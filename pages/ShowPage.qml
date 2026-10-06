@@ -30,6 +30,7 @@ Item {
   property bool loading: false
   property bool failed: false
   property bool loadingMore: false
+  property bool moreFailed: false
 
   readonly property bool saved: service && show ? service.isShowSaved(show.alias) : false
   readonly property bool hasMore: episodes.length > 0 && episodes.length < total
@@ -82,6 +83,7 @@ Item {
     episodes = []
     total = 0
     failed = false
+    moreFailed = false
     if (!api || alias === "") return
     loading = true
     var wanted = alias
@@ -110,7 +112,13 @@ Item {
   // "Load more" affordance is honest rather than optimistic.
   function fetchCount(wanted) {
     api.showEpisodes(wanted, 1, 0, function(result, ok) {
-      if (root.alias !== wanted || !ok || !result) return
+      if (root.alias !== wanted) return
+      if (!ok || !result) {
+        // The embedded first page still works. Let Load more recover the
+        // count instead of pretending it was the complete archive.
+        if (root.episodes.length > 0) root.total = root.episodes.length + 1
+        return
+      }
       root.total = result.total
     })
   }
@@ -132,13 +140,17 @@ Item {
   function loadMore() {
     if (!api || loadingMore || !hasMore) return
     loadingMore = true
+    moreFailed = false
     var wanted = alias
     var offset = episodes.length
 
     api.showEpisodes(wanted, 16, offset, function(result, ok) {
       if (root.alias !== wanted) return
       root.loadingMore = false
-      if (!ok || !result) return
+      if (!ok || !result) {
+        root.moreFailed = true
+        return
+      }
       // Concatenate rather than replace; the model is the whole list so far.
       var merged = root.episodes.slice()
       var named = root.stamped(result.episodes, root.show ? root.show.name : "")
@@ -343,7 +355,7 @@ Item {
             id: more
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
-            label: root.loadingMore ? "Loading" : "Load more"
+            label: root.loadingMore ? "Loading" : (root.moreFailed ? "Retry episodes" : "Load more")
             enabledAction: !root.loadingMore
             ink: root.ink
             onActivated: root.loadMore()
