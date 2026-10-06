@@ -159,6 +159,7 @@ Item {
 
           SeekBar {
             id: seek
+            accessibleName: "Episode position"
             anchors.left: parent.left
             anchors.right: elapsed.left
             anchors.rightMargin: Style.space(10)
@@ -191,14 +192,14 @@ Item {
     Item {
       id: volumeBlock
       anchors.verticalCenter: parent.verticalCenter
-      width: Style.space(120)
+      width: Style.space(145)
       height: parent.height
 
       Caption {
         id: volumeLabel
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        text: "Vol"
+        text: root.service && root.service.castingAudio ? "Cast" : "System"
         ink: root.ink
         dim: 0.45
       }
@@ -207,6 +208,8 @@ Item {
       // idea doing two jobs rather than two controls that look different for
       // no reason.
       SeekBar {
+        accessibleName: root.service && root.service.castingAudio
+          ? "Cast volume" : "System volume"
         anchors.left: volumeLabel.right
         anchors.leftMargin: Style.space(8)
         anchors.right: parent.right

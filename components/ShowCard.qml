@@ -21,6 +21,20 @@ Item {
   signal opened()
   signal played()
 
+  activeFocusOnTab: visible
+  Accessible.role: Accessible.Button
+  Accessible.name: item ? item.name : "Show"
+  Keys.onPressed: function(event) {
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      root.opened()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Space) {
+      if (root.hasAudio) root.played()
+      else root.opened()
+      event.accepted = true
+    }
+  }
+
   readonly property bool hasAudio: !isShow && item && item.audioUrl !== ""
   readonly property bool isPlaying: !isShow && service && item
     ? service.isCurrentEpisode(item) && service.playing : false
@@ -34,7 +48,10 @@ Item {
   MouseArea {
     anchors.fill: parent
     cursorShape: Qt.PointingHandCursor
-    onClicked: root.opened()
+    onClicked: {
+      root.forceActiveFocus()
+      root.opened()
+    }
   }
 
   ArtFrame {
@@ -46,16 +63,19 @@ Item {
     ink: root.ink
     decodeWidth: 400
     showPlayAffordance: root.hasAudio
-    hovered: hover.hovered || root.selected
+    hovered: hover.hovered || root.selected || root.activeFocus
     playing: root.isPlaying
-    border.color: root.selected ? root.ink : Util.alpha(root.ink, 0.28)
-    border.width: root.selected ? 2 : 1
+    border.color: root.selected || root.activeFocus ? root.ink : Util.alpha(root.ink, 0.28)
+    border.width: root.selected || root.activeFocus ? 2 : 1
 
     MouseArea {
       anchors.fill: parent
       enabled: root.hasAudio
       cursorShape: Qt.PointingHandCursor
-      onClicked: root.played()
+      onClicked: {
+        root.forceActiveFocus()
+        root.played()
+      }
     }
   }
 

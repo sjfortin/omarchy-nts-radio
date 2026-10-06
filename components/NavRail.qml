@@ -69,6 +69,16 @@ Item {
         Item {
           id: navItem
           required property var modelData
+          activeFocusOnTab: true
+          Accessible.role: Accessible.Button
+          Accessible.name: modelData.label
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                || event.key === Qt.Key_Space) {
+              root.navigated(navItem.modelData.id)
+              event.accepted = true
+            }
+          }
 
           readonly property bool selected: root.current === modelData.id
 
@@ -79,7 +89,7 @@ Item {
             anchors.fill: parent
             anchors.leftMargin: -Style.space(6)
             anchors.rightMargin: -Style.space(6)
-            color: navItem.selected ? Util.alpha(root.ink, 0.12)
+            color: navItem.selected || navItem.activeFocus ? Util.alpha(root.ink, 0.12)
               : (navHover.hovered ? Util.alpha(root.ink, 0.06) : "transparent")
           }
 
@@ -114,7 +124,10 @@ Item {
           MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.navigated(navItem.modelData.id)
+            onClicked: {
+              navItem.forceActiveFocus()
+              root.navigated(navItem.modelData.id)
+            }
           }
         }
       }
@@ -139,6 +152,16 @@ Item {
         Item {
           id: channelItem
           required property int modelData
+          activeFocusOnTab: true
+          Accessible.role: Accessible.Button
+          Accessible.name: "Play NTS " + modelData
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                || event.key === Qt.Key_Space) {
+              root.liveRequested(channelItem.modelData)
+              event.accepted = true
+            }
+          }
 
           readonly property bool selected: root.service
             && !root.service.archiveMode && root.service.channel === modelData
@@ -152,7 +175,8 @@ Item {
             anchors.fill: parent
             anchors.leftMargin: -Style.space(6)
             anchors.rightMargin: -Style.space(6)
-            color: channelHover.hovered ? Util.alpha(root.ink, 0.06) : "transparent"
+            color: channelItem.activeFocus || channelHover.hovered
+              ? Util.alpha(root.ink, 0.12) : "transparent"
           }
 
           Column {
@@ -201,7 +225,10 @@ Item {
           MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.liveRequested(channelItem.modelData)
+            onClicked: {
+              channelItem.forceActiveFocus()
+              root.liveRequested(channelItem.modelData)
+            }
           }
         }
       }
@@ -213,6 +240,16 @@ Item {
   // quietest place that is still somewhere a person looks.
   Item {
     id: helpHint
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: "Keyboard shortcuts"
+    Keys.onPressed: function(event) {
+      if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+          || event.key === Qt.Key_Space) {
+        root.helpRequested()
+        event.accepted = true
+      }
+    }
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: parent.bottom
@@ -225,7 +262,7 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       text: "? Keyboard"
       ink: root.ink
-      dim: helpHover.hovered ? 0.75 : 0.35
+      dim: helpHover.hovered || helpHint.activeFocus ? 0.9 : 0.35
     }
 
     HoverHandler { id: helpHover }
@@ -233,7 +270,10 @@ Item {
     MouseArea {
       anchors.fill: parent
       cursorShape: Qt.PointingHandCursor
-      onClicked: root.helpRequested()
+      onClicked: {
+        helpHint.forceActiveFocus()
+        root.helpRequested()
+      }
     }
   }
 }

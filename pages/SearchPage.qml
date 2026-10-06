@@ -291,6 +291,7 @@ Item {
     var next = String(value || "").trim()
     if (next === query) return
     generation++
+    if (api && typeof api.invalidateSearch === "function") api.invalidateSearch()
     playRequest++
     trackMessage = ""
     clearResults()
@@ -322,6 +323,7 @@ Item {
     debounce.stop()
     if (!api || query === "") return
     generation++
+    if (api && typeof api.invalidateSearch === "function") api.invalidateSearch()
     playRequest++
     trackMessage = ""
     clearResults()
@@ -720,6 +722,18 @@ Item {
             id: trackRow
             required property var modelData
             required property int index
+            activeFocusOnTab: linked
+            Accessible.role: Accessible.Button
+            Accessible.name: modelData.artist + " — " + modelData.title
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.episodeRequested(root.episodeFromTrack(trackRow.modelData))
+                event.accepted = true
+              } else if (event.key === Qt.Key_Space) {
+                root.playTrack(trackRow.modelData)
+                event.accepted = true
+              }
+            }
 
             readonly property bool selected: root.cursor === root.tracksOffset + index
             onSelectedChanged: if (selected) root.ensureVisible(this)
@@ -733,7 +747,7 @@ Item {
               anchors.fill: parent
               anchors.leftMargin: -Style.space(6)
               anchors.rightMargin: -Style.space(6)
-              color: trackRow.selected ? Util.alpha(root.ink, 0.13)
+              color: trackRow.selected || trackRow.activeFocus ? Util.alpha(root.ink, 0.13)
                 : (trackHover.hovered && trackRow.linked
                    ? Util.alpha(root.ink, 0.06) : "transparent")
             }
@@ -744,7 +758,10 @@ Item {
               anchors.fill: parent
               enabled: trackRow.linked
               cursorShape: Qt.PointingHandCursor
-              onClicked: root.episodeRequested(root.episodeFromTrack(trackRow.modelData))
+              onClicked: {
+                trackRow.forceActiveFocus()
+                root.episodeRequested(root.episodeFromTrack(trackRow.modelData))
+              }
             }
 
             Row {

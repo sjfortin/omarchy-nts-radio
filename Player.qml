@@ -46,7 +46,7 @@ Item {
   // Shown by MPRIS clients and media-key OSDs. Pushed live, so the OSD
   // follows the NTS schedule rather than the icy stream name.
   property string mediaTitle: ""
-  property int volume: 70
+  property int volume: 100
   // Absolute path to mpv's mpris script, or "" when none was found.
   property string mprisScript: ""
   // Paused playback holds a socket open on the NTS relay for no reason.

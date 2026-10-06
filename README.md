@@ -50,7 +50,7 @@ The widget lands on the right of the bar. Move it with `omarchy bar move`.
 | Click | open or close the panel |
 | Middle-click | play or pause |
 | Right-click | switch NTS 1 / NTS 2, or return to live from an archived show |
-| Scroll | volume |
+| Scroll | system output volume locally, or cast-device volume while casting |
 
 The bar shows what is actually playing. On live radio that is the channel
 number and the broadcast title. On an archived show the channel is replaced by
@@ -95,8 +95,9 @@ this table:
 | `Enter` | open what the cursor is on |
 | `p` | play what the cursor is on |
 | `b` | save or unsave what the cursor is on |
-| `Tab` | switch tabs on Saved |
-| `Space` | play or pause |
+| `Tab` | focus the next control |
+| `Ctrl-Tab` | switch result groups or Saved tabs |
+| `Space` | play or pause, or activate a focused control |
 | `1` `2` | live NTS 1 / NTS 2 |
 | `h` `s` | Home / Saved |
 | `←` `→` | scrub an archived show by 30s |
@@ -153,8 +154,10 @@ The device fetches the NTS stream itself, so nothing is re-encoded here and
 your laptop can sleep without interrupting the radio. Archived shows cast too
 and stay seekable on the device.
 
-- The volume slider controls whichever output is active. The device and mpv
-  keep separate levels.
+- Local playback follows the same system output volume as Omarchy's Audio
+  panel and volume keys. NTS's slider and bar scroll adjust that system level.
+- While casting, the slider controls the device's separate volume. Its last
+  level is remembered for the next cast session.
 - Media keys and MPRIS apply to local playback only, since a cast session runs
   on the device.
 - The device shows the programme that was on air when casting started.
@@ -194,6 +197,9 @@ omarchy-shell nts-radio devices               # discover devices, as JSON
 omarchy-shell nts-radio status       # JSON: playback, output, show, archive, library
 omarchy-shell nts-radio episode <show-alias> <episode-alias>
 ```
+
+`volume` changes the system output level during local playback, or the device
+level while casting.
 
 The two aliases `episode` takes are the last two path segments of the nts.live
 URL. For
@@ -235,7 +241,7 @@ Under **Setup → Plugins → NTS Radio**, or as keys on the widget's entry in
 | `channel` | `NTS 1` | Channel to start on. Switching in the panel updates this. |
 | `showTitleInBar` | `When playing` | `Always`, `When playing`, or `Never`. |
 | `maxBarTextWidth` | `160` | Pixel cap on the bar title. `0` hides it. |
-| `volume` | `70` | Stream volume, independent of system volume. |
+| `volume` | `70` | Remembered cast-device volume. Local playback uses system output volume. |
 | `refreshMinutes` | `1` | Minutes between schedule refreshes while a panel or the browser is open, or audio is playing. Otherwise every 15 minutes. |
 | `scrollSpeed` | `100` | How far a swipe or wheel notch scrolls in the browser, as a percentage. Raise it if scrolling feels heavy. |
 | `output` | `local` | Records what the last session was doing. Not restored as a starting output. |

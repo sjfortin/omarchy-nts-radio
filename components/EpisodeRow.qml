@@ -28,6 +28,19 @@ Item {
   signal opened()
   signal played()
 
+  activeFocusOnTab: visible
+  Accessible.role: Accessible.Button
+  Accessible.name: episode ? episode.name : "Episode"
+  Keys.onPressed: function(event) {
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      root.opened()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Space && root.hasAudio) {
+      root.played()
+      event.accepted = true
+    }
+  }
+
   readonly property bool isPlaying: service && episode
     ? service.isCurrentEpisode(episode) && service.playing : false
   readonly property bool isCurrent: service && episode
@@ -41,7 +54,7 @@ Item {
     anchors.fill: parent
     anchors.leftMargin: -Style.space(6)
     anchors.rightMargin: -Style.space(6)
-    color: root.selected ? Util.alpha(root.ink, 0.13)
+      color: root.selected || root.activeFocus ? Util.alpha(root.ink, 0.13)
       : (hover.hovered ? Util.alpha(root.ink, 0.06) : "transparent")
   }
 
@@ -53,7 +66,7 @@ Item {
     width: Style.space(3)
     height: parent.height * 0.6
     radius: 0
-    visible: root.selected
+    visible: root.selected || root.activeFocus
     color: root.ink
   }
 
@@ -62,7 +75,10 @@ Item {
   MouseArea {
     anchors.fill: parent
     cursorShape: Qt.PointingHandCursor
-    onClicked: root.opened()
+    onClicked: {
+      root.forceActiveFocus()
+      root.opened()
+    }
   }
 
   Row {
@@ -91,7 +107,10 @@ Item {
         anchors.fill: parent
         enabled: root.hasAudio
         cursorShape: Qt.PointingHandCursor
-        onClicked: root.played()
+        onClicked: {
+          root.forceActiveFocus()
+          root.played()
+        }
       }
     }
 
@@ -145,7 +164,7 @@ Item {
       // stays a list of titles rather than a wall of controls.
       BlockButton {
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.hasAudio && (hover.hovered || root.selected || root.isCurrent)
+        visible: root.hasAudio && (hover.hovered || root.selected || root.activeFocus || root.isCurrent)
         label: root.isPlaying ? "Pause" : "Play"
         filled: root.isPlaying
         ink: root.ink
@@ -155,7 +174,7 @@ Item {
 
       BlockButton {
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.showSaveAction && (hover.hovered || root.selected || root.isSaved)
+        visible: root.showSaveAction && (hover.hovered || root.selected || root.activeFocus || root.isSaved)
         label: root.isSaved ? "Saved" : "Save"
         filled: root.isSaved
         ink: root.ink

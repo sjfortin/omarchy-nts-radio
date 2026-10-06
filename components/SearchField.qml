@@ -84,12 +84,24 @@ Item {
 
   Caption {
     id: clearButton
+    activeFocusOnTab: visible
+    Accessible.role: Accessible.Button
+    Accessible.name: "Clear search"
+    Keys.onPressed: function(event) {
+      if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+          || event.key === Qt.Key_Space) {
+        root.clear()
+        root.edited("")
+        input.forceActiveFocus()
+        event.accepted = true
+      }
+    }
     anchors.right: parent.right
     anchors.verticalCenter: input.verticalCenter
     visible: input.text !== ""
     text: "Clear"
     ink: root.ink
-    dim: clearHover.hovered ? 0.9 : 0.45
+    dim: clearHover.hovered || activeFocus ? 0.9 : 0.45
 
     HoverHandler { id: clearHover }
 

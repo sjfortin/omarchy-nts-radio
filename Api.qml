@@ -51,9 +51,10 @@ Item {
   property int cacheCount: 0
   property int cacheBytes: 0
 
-  // Pending work, oldest first: { url, callback, ttl, tries }
+  // Pending work, oldest first: { url, callbacks, ttl, tries, kind, epoch }
   property var queue: []
   property int inFlight: 0
+  property int searchEpoch: 0
 
   // True while anything at all is outstanding. Pages use it for a single
   // quiet loading state rather than tracking their own requests.
@@ -117,6 +118,8 @@ Item {
 
     var settings = options && typeof options === "object" ? options : {}
     var ttl = settings.ttl === undefined ? cacheTtlMs : settings.ttl
+    var kind = settings.kind || ""
+    var epoch = kind === "search" ? searchEpoch : -1
 
     if (settings.force !== true) {
       var hit = cached(target, ttl)
@@ -126,9 +129,48 @@ Item {
       }
     }
 
+    // A detail page and playback action often ask for the same episode at
+    // once. One fetch can answer both without spending two pool slots.
+    if (settings.force !== true) {
+      var existing = pendingJob(target, kind, epoch)
+      if (existing) {
+        existing.callbacks.push(callback)
+        return
+      }
+    }
     var next = queue.slice()
-    next.push({ url: target, callback: callback, ttl: ttl, tries: 0 })
+    next.push({ url: target, callbacks: [callback], ttl: ttl, tries: 0,
+      kind: kind, epoch: epoch })
     queue = next
+    pump()
+  }
+
+  function pendingJob(url, kind, epoch) {
+    var lists = [queue, retryQueue]
+    for (var l = 0; l < lists.length; l++)
+      for (var i = 0; i < lists[l].length; i++) {
+        var job = lists[l][i]
+        if (job.url === url && job.kind === kind && job.epoch === epoch) return job
+      }
+    for (var slotIndex = 0; slotIndex < pool.count; slotIndex++) {
+      var slot = pool.objectAt(slotIndex)
+      var running = slot && slot.job
+      if (running && running.url === url && running.kind === kind
+          && running.epoch === epoch) return running
+    }
+    return null
+  }
+
+  // The search page discards old results when the query changes. Drop their
+  // queued work too, and stop active curl requests so the new query can start.
+  function invalidateSearch() {
+    searchEpoch++
+    queue = queue.filter(function(job) { return job.kind !== "search" })
+    retryQueue = retryQueue.filter(function(job) { return job.kind !== "search" })
+    for (var i = 0; i < pool.count; i++) {
+      var slot = pool.objectAt(i)
+      if (slot && slot.job && slot.job.kind === "search") slot.abort()
+    }
     pump()
   }
 
@@ -152,7 +194,9 @@ Item {
 
   function search(query, types, limit, offset, callback) {
     var url = NtsApi.searchUrl(query, types, limit, offset)
-    getJson(url, NtsApi.parseSearch, callback, { ttl: searchCacheTtlMs })
+    getJson(url, NtsApi.parseSearch, callback, {
+      ttl: searchCacheTtlMs, kind: String(query || "") === "" ? "" : "search"
+    })
   }
 
   function show(alias, callback) {
@@ -218,6 +262,10 @@ Item {
     slot.job = null
     inFlight = Math.max(0, inFlight - 1)
     if (!job) return
+    if (job.kind === "search" && job.epoch !== searchEpoch) {
+      pump()
+      return
+    }
 
     if (ok) {
       store(job.url, text)
@@ -243,10 +291,12 @@ Item {
   }
 
   function deliver(job, text, ok) {
-    try {
-      job.callback(text, ok)
-    } catch (e) {
-      console.warn("nts-radio: request callback threw: " + e)
+    for (var i = 0; i < job.callbacks.length; i++) {
+      try {
+        job.callbacks[i](text, ok)
+      } catch (e) {
+        console.warn("nts-radio: request callback threw: " + e)
+      }
     }
   }
 

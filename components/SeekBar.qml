@@ -13,8 +13,25 @@ Item {
   property real duration: 0
   property bool enabledAction: true
   property color ink: Color.foreground
+  property string accessibleName: "Position"
 
   signal seeked(real seconds)
+
+  activeFocusOnTab: visible && enabledAction
+  Accessible.role: Accessible.Slider
+  Accessible.name: accessibleName
+
+  Keys.onPressed: function(event) {
+    if (!root.enabledAction) return
+    var step = root.duration <= 100 ? 5 : 30
+    if (event.key === Qt.Key_Left || event.key === Qt.Key_Down) {
+      root.seeked(Math.max(0, root.position - step))
+      event.accepted = true
+    } else if (event.key === Qt.Key_Right || event.key === Qt.Key_Up) {
+      root.seeked(Math.min(root.duration, root.position + step))
+      event.accepted = true
+    }
+  }
 
   property bool dragging: false
   property real dragFraction: 0
@@ -24,6 +41,14 @@ Item {
     : (duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0)
 
   implicitHeight: Style.space(12)
+
+  Rectangle {
+    anchors.fill: parent
+    visible: root.activeFocus
+    color: "transparent"
+    border.width: 1
+    border.color: root.ink
+  }
 
   function fractionAt(x) {
     return width <= 0 ? 0 : Math.max(0, Math.min(1, x / width))
