@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 import "../components" as Nts
 import "../Model.js" as Model
@@ -18,8 +19,8 @@ Item {
 
   property var service: null
   property bool active: true
-  property color ink: Color.foreground
-  property color paper: Color.background
+  property color ink: Commons.Color.foreground
+  property color paper: Commons.Color.background
 
   signal showRequested(string alias)
   signal episodeRequested(var episode)
@@ -96,10 +97,13 @@ Item {
   // live channel cards are deliberately left out: they already have dedicated
   // keys (1 and 2) that work from anywhere in the browser.
 
+  readonly property var followed: service && service.followedEpisodes ? service.followedEpisodes.slice(0, 12) : []
+
   property int cursor: -1
 
   readonly property int savedOffset: continueListening.length
-  readonly property int picksOffset: savedOffset + savedShows.length
+  readonly property int followedOffset: savedOffset + savedShows.length
+  readonly property int picksOffset: followedOffset + followed.length
   readonly property int recentOffset: picksOffset + picks.length
   readonly property int cursorCount: recentOffset + recent.length
 
@@ -112,7 +116,8 @@ Item {
   function cursorTarget() {
     if (cursor < 0 || cursor >= cursorCount) return null
     if (cursor < savedOffset) return { kind: "episode", item: continueListening[cursor] }
-    if (cursor < picksOffset) return { kind: "show", item: savedShows[cursor - savedOffset] }
+    if (cursor < followedOffset) return { kind: "show", item: savedShows[cursor - savedOffset] }
+    if (cursor < picksOffset) return { kind: "episode", item: followed[cursor - followedOffset] }
     if (cursor < recentOffset) return { kind: "episode", item: picks[cursor - picksOffset] }
     return { kind: "episode", item: recent[cursor - recentOffset] }
   }
@@ -185,7 +190,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Live now"
+          title: Nts.Strings.t("Live now")
           ink: root.ink
           aside: root.service && root.service.metadataFailed
             ? (root.service.live ? "Schedule may be out of date" : "Cannot reach NTS") : ""
@@ -320,7 +325,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Continue listening"
+          title: Nts.Strings.t("Continue listening")
           ink: root.ink
         }
 
@@ -356,7 +361,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Your shows"
+          title: Nts.Strings.t("Your shows")
           ink: root.ink
           aside: root.library && root.library.shows.length > 6
             ? root.library.shows.length + " saved" : ""
@@ -389,6 +394,29 @@ Item {
         }
       }
 
+      Column {
+        width: parent.width
+        spacing: Style.space(8)
+        visible: root.followed.length > 0
+        Nts.SectionHeader { width: parent.width; title: Nts.Strings.t("From your saved shows"); ink: root.ink }
+        Repeater {
+          model: root.followed
+          Nts.EpisodeRow {
+            required property var modelData
+            required property int index
+            width: parent.width
+            episode: modelData
+            service: root.service
+            active: root.active
+            ink: root.ink
+            selected: root.cursor === root.followedOffset + index
+            onSelectedChanged: if (selected) root.ensureVisible(this)
+            onOpened: root.episodeRequested(modelData)
+            onPlayed: root.service.playEpisode(modelData, -1)
+          }
+        }
+      }
+
       // ---- discover
 
       Column {
@@ -397,16 +425,16 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "NTS picks"
+          title: Nts.Strings.t("NTS picks")
           ink: root.ink
         }
 
         Nts.StateNote {
           width: parent.width
           ink: root.ink
-          text: root.loadingDiscover ? "Loading" : (root.discoverFailed ? "Could not reach NTS" : "")
+          text: root.loadingDiscover ? Nts.Strings.t("Loading") : (root.discoverFailed ? Nts.Strings.t("Could not reach NTS") : "")
           isError: root.discoverFailed
-          actionLabel: root.discoverFailed ? "Try again" : ""
+          actionLabel: root.discoverFailed ? Nts.Strings.t("Try again") : ""
           onActionTriggered: root.reload()
         }
 
@@ -448,7 +476,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Recently added"
+          title: Nts.Strings.t("Recently added")
           ink: root.ink
         }
 

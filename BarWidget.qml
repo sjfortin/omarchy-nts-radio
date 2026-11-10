@@ -1,5 +1,7 @@
 import QtQuick
+import "components" as Kit
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // qs.Ui exports a `Panel` of its own, and an explicit module import shadows
@@ -24,8 +26,8 @@ BarWidget {
   property bool popupOpen: false
   property bool watching: false
 
-  readonly property color ink: bar ? bar.barForeground : Color.foreground
-  readonly property color paper: bar ? bar.background : Color.background
+  readonly property color ink: bar ? bar.barForeground : Commons.Color.foreground
+  readonly property color paper: bar ? bar.background : Commons.Color.background
 
   readonly property int channel: service ? service.channel : 1
   readonly property bool playing: service ? service.playing : false
@@ -295,7 +297,7 @@ BarWidget {
   }
 
   function tooltip() {
-    var state = playing ? "On air" : (loading ? "Connecting" : "Stopped")
+    var state = playing ? Kit.Strings.t("On air") : (loading ? Kit.Strings.t("Connecting") : Kit.Strings.t("Stopped"))
     var line = archive ? "Archive · " + state : Model.channelLabel(channel) + " · " + state
     if (archive && service && service.durationSec > 0) {
       line += " · " + NtsApi.clockFromSeconds(service.positionSec)
@@ -305,7 +307,7 @@ BarWidget {
     var last = archive
       ? "Click for the panel · middle-click to pause · right-click for live radio"
       : "Click for the panel · middle-click to play · right-click to switch channel"
-    return line + "\n" + last
+    return Model.tooltipText(line + "\n" + last)
   }
 
   PopupCard {

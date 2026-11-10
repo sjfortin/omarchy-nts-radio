@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Io
 
 import "Model.js" as Model
+import "Library.js" as Library
 
 // Playback on a Chromecast-protocol device (Google Home, Nest, Chromecast
 // Audio, and anything else speaking `_googlecast._tcp`).
@@ -43,6 +44,10 @@ Item {
   property string mediaTitle: ""
   property string mediaSubtitle: ""
   property string artworkUrl: ""
+  property var sessionMetadata: ({})
+  signal sessionRecovered(var session, bool wasPaused)
+  signal finished()
+  signal recoveryAbsent()
   property int volume: 70
 
   // The bridge is only worth running while a UI is showing device choices or
@@ -165,6 +170,7 @@ Item {
       artwork: artworkUrl,
       live: liveStream,
       start: liveStream ? 0 : Math.max(0, startPositionSec),
+      session: sessionMetadata,
       type: liveStream ? "audio/mpeg" : mediaContentType
     })
   }
@@ -198,13 +204,15 @@ Item {
     liveStream = live === true
     streamUrl = String(url || "")
     startPositionSec = Math.max(0, Number(startSec) || 0)
-    if (wanted && connected) startStream()
+    positionSec = liveStream ? 0 : startPositionSec
+    durationSec = 0
   }
 
   // Pause an archived show on the device, keeping its place. Live radio has
   // nothing to come back to, so the service stops that instead.
   function pause() {
-    if (liveStream || !connected) return
+    if (liveStream) return
+    if (!connected || !everPlayed) { stop(); return }
     paused = true
     send({ cmd: "pause" })
   }
@@ -248,7 +256,8 @@ Item {
     if (targetUuid === "") return
     adopting = true
     adoptTimeout.restart()
-    discover()
+    if (connected && bridgeReady) send({ cmd: "status", fresh: true })
+    else discover()
   }
 
   property bool adopting: false
@@ -290,7 +299,6 @@ Item {
 
   Component.onDestruction: {
     if (bridge.running) {
-      send({ cmd: "stop" })
       send({ cmd: "quit" })
     }
     bridge.running = false
@@ -338,6 +346,7 @@ Item {
       return
 
     case "connected":
+      if (Model.plainText(message.uuid, 80) !== targetUuid) return
       connected = true
       targetUuid = Model.plainText(message.uuid, 80)
       targetName = Model.plainText(message.name, 80)
@@ -378,18 +387,37 @@ Item {
       // connected session answers UNKNOWN for a moment before the real state
       // arrives, and treating that as "not playing" would abandon a live
       // session a second before it identified itself.
-      if (adopting) {
-        if (reported === "PLAYING") {
-          adopting = false
-          adoptTimeout.stop()
-          if (Model.isOwnStream(deviceContent)) {
-            wanted = true
-            everPlayed = true
-          }
-        } else if (reported === "IDLE" || reported === "PAUSED") {
-          adopting = false
-          adoptTimeout.stop()
+      if (adopting && (reported === "PLAYING" || reported === "PAUSED" || reported === "BUFFERING")) {
+        var session = message.session
+        var recognized = session && ((session.mode === "live" && (session.channel === 1 || session.channel === 2))
+          || (session.mode === "archive" && Library.savedEpisodeFromEntry(session.episode)
+            && Library.savedEpisodeFromEntry(session.episode).audioUrl !== ""))
+        if (!recognized && Model.isOwnStream(deviceContent)) {
+          session = { mode: "live", channel: deviceContent === Model.streamUrl(2) ? 2 : 1 }
+          recognized = true
         }
+        if (recognized) {
+          adoptTimeout.stop()
+          liveStream = session.mode === "live"
+          streamUrl = deviceContent
+          paused = reported === "PAUSED"
+          positionSec = Math.max(0, Number(message.position) || 0)
+          durationSec = Math.max(0, Number(message.duration) || 0)
+          sessionRecovered(session, paused)
+          wanted = true
+          everPlayed = !paused
+          adopting = false
+        } else {
+          adopting = false
+          recoveryAbsent()
+        }
+      } else if (adopting && reported === "IDLE") {
+        adopting = false
+        recoveryAbsent()
+      }
+      if (!adopting && wanted && !liveStream && reported === "IDLE" && message.idleReason === "FINISHED") {
+        wanted = false
+        finished()
       }
       if (deviceState === "PLAYING") {
         everPlayed = true
@@ -398,6 +426,8 @@ Item {
         lastError = ""
       }
       else if (deviceState === "IDLE" || deviceState === "PAUSED") everPlayed = false
+      if (wanted && reported === "PAUSED") paused = true
+      else if (wanted && reported === "PLAYING") paused = false
 
       // Named apart from `reported` above on purpose. `var` is function-scoped
       // and hoisted, so a second `var reported` here is the same variable — it
@@ -421,6 +451,7 @@ Item {
 
   Process {
     id: bridge
+    objectName: "bridge"
     running: false
     stdinEnabled: true
     command: ["python3", root.pluginDir + "/scripts/cast.py"]
@@ -470,6 +501,13 @@ Item {
       if (root.devices.length === 0 && root.lastError === "")
         root.lastError = "No cast devices found on this network"
     }
+  }
+
+  Timer {
+    interval: 5000
+    repeat: true
+    running: root.wanted && root.connected && !root.liveStream && !root.paused
+    onTriggered: root.send({ cmd: "status" })
   }
 
   // A device that never says what it is doing should not hold the bridge up.

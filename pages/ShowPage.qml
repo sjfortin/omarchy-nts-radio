@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 import "../components" as Nts
 import "../NtsApi.js" as NtsApi
@@ -17,7 +18,7 @@ Item {
 
   property var service: null
   property bool active: true
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   property string alias: ""
 
   signal episodeRequested(var episode)
@@ -180,9 +181,9 @@ Item {
       Nts.StateNote {
         width: parent.width
         ink: root.ink
-        text: root.loading ? "Loading" : (root.failed ? "Could not load this show" : "")
+        text: root.loading ? Nts.Strings.t("Loading") : (root.failed ? Nts.Strings.t("Could not load this show") : "")
         isError: root.failed
-        actionLabel: root.failed ? "Try again" : ""
+        actionLabel: root.failed ? Nts.Strings.t("Try again") : ""
         onActionTriggered: root.load()
       }
 
@@ -208,7 +209,7 @@ Item {
           spacing: Style.space(9)
 
           Nts.Caption {
-            text: "Show"
+            text: Nts.Strings.t("Show")
             ink: root.ink
             dim: 0.4
           }
@@ -262,7 +263,7 @@ Item {
             spacing: Style.space(8)
 
             Nts.BlockButton {
-              label: root.saved ? "Saved" : "Save show"
+              label: root.saved ? Nts.Strings.t("Saved") : Nts.Strings.t("Save show")
               filled: root.saved
               ink: root.ink
               enabledAction: root.show !== null
@@ -270,7 +271,7 @@ Item {
             }
 
             Nts.BlockButton {
-              label: "Open on nts.live"
+              label: Nts.Strings.t("Open on nts.live")
               ink: root.ink
               enabledAction: root.show !== null
               onActivated: if (root.service) root.service.openExternal(root.show.url)
@@ -289,7 +290,7 @@ Item {
             Nts.Caption {
               ink: root.ink
               dim: 0.4
-              text: "Elsewhere"
+              text: Nts.Strings.t("Elsewhere")
             }
 
             Flow {
@@ -320,7 +321,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Episodes"
+          title: Nts.Strings.t("Episodes")
           ink: root.ink
           aside: root.total > 0 ? root.episodes.length + " of " + root.total : ""
         }
@@ -355,7 +356,7 @@ Item {
             id: more
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
-            label: root.loadingMore ? "Loading" : (root.moreFailed ? "Retry episodes" : "Load more")
+            label: root.loadingMore ? Nts.Strings.t("Loading") : (root.moreFailed ? Nts.Strings.t("Retry episodes") : Nts.Strings.t("Load more"))
             enabledAction: !root.loadingMore
             ink: root.ink
             onActivated: root.loadMore()

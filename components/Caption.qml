@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // Uppercase, letter-spaced, quiet. Every label in the browser that is not
 // content itself — section headers, metadata, times, states — is one of these.
@@ -9,7 +10,7 @@ Text {
   id: root
 
   property real dim: 0.55
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
 
   textFormat: Text.PlainText
   color: Util.alpha(ink, dim)

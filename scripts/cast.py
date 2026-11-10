@@ -80,7 +80,7 @@ def _seconds(value):
 def volume_to_percent(level):
     try:
         return max(0, min(100, int(round(float(level) * 100))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -92,12 +92,31 @@ def clean(value, limit=200):
     return text[:limit]
 
 
+def clean_session(value):
+    """Only bounded public episode identity is carried over the cast protocol."""
+    if not isinstance(value, dict):
+        return None
+    if value.get("mode") == "live" and type(value.get("channel")) is int and value["channel"] in (1, 2):
+        return {"mode": "live", "channel": value["channel"]}
+    episode = value.get("episode")
+    if value.get("mode") != "archive" or not isinstance(episode, dict):
+        return None
+    fields = {"showAlias": 200, "episodeAlias": 200, "name": 500, "showName": 500,
+              "audioUrl": 2000, "artworkSmall": 600, "artworkLarge": 600, "dateLabel": 40}
+    item = {key: clean(episode.get(key), limit) for key, limit in fields.items()}
+    if not item["showAlias"] or not item["episodeAlias"]:
+        return None
+    return {"mode": "archive", "episode": item}
+
+
 class Bridge(CastStatusListener, MediaStatusListener):
     def __init__(self):
         self.browser = None
         self.devices = {}          # uuid -> Chromecast
         self.cast = None
         self.lock = threading.Lock()
+        self.connect_lock = threading.Lock()
+        self.connect_generation = 0
 
     # ------------------------------------------------------------ discovery
 
@@ -148,15 +167,27 @@ class Bridge(CastStatusListener, MediaStatusListener):
                 "host": str(c.cast_info.host),
                 "port": int(c.cast_info.port),
             }
-            for c in listing
+            for c in listing[:64]
         ])
 
     # ----------------------------------------------------------- connection
 
     def connect(self, uuid):
-        threading.Thread(target=self._connect_now, args=(str(uuid),), daemon=True).start()
+        with self.lock:
+            self.connect_generation += 1
+            generation = self.connect_generation
+        threading.Thread(target=self._connect_latest, args=(str(uuid), generation), daemon=True).start()
 
-    def _connect_now(self, uuid):
+    def _connect_latest(self, uuid, generation):
+        # One connection mutation at a time. New requests supersede waiting
+        # workers, and a late network reply cannot select an old speaker.
+        with self.connect_lock:
+            with self.lock:
+                if generation != self.connect_generation:
+                    return
+            self._connect_now(uuid, generation)
+
+    def _connect_now(self, uuid, generation):
         with self.lock:
             cast = self.devices.get(uuid)
 
@@ -174,7 +205,11 @@ class Bridge(CastStatusListener, MediaStatusListener):
 
         current = self.cast
         if current is not None and str(current.cast_info.uuid) == uuid:
-            return  # already connected
+            emit(event="connected", uuid=uuid,
+                 name=clean(current.cast_info.friendly_name, 80),
+                 volume=volume_to_percent(current.status.volume_level if current.status else 0))
+            current.media_controller.update_status()
+            return
 
         self.disconnect()
         try:
@@ -183,7 +218,11 @@ class Bridge(CastStatusListener, MediaStatusListener):
             emit(event="error", message="could not reach device: {}".format(exc))
             return
 
-        self.cast = cast
+        with self.lock:
+            if generation != self.connect_generation:
+                cast.disconnect(blocking=False)
+                return
+            self.cast = cast
         cast.register_status_listener(self)
         cast.media_controller.register_status_listener(self)
         emit(
@@ -202,7 +241,8 @@ class Bridge(CastStatusListener, MediaStatusListener):
             cast.media_controller.update_status()
         except Exception:
             pass
-        self._emit_status()
+        # Wait for the actual media response; the initial empty status can
+        # incorrectly identify a still-playing session as IDLE.
 
     def disconnect(self):
         cast, self.cast = self.cast, None
@@ -216,7 +256,7 @@ class Bridge(CastStatusListener, MediaStatusListener):
     # ------------------------------------------------------------- playback
 
     def play(self, url, title="", subtitle="", artwork="", live=True, start=0,
-             content_type="audio/mpeg"):
+             content_type="audio/mpeg", session=None):
         # Snapshot rather than read self.cast repeatedly: commands arrive on the
         # stdin thread while connect and disconnect run on workers, so the
         # attribute can be replaced between two reads of it. Every method below
@@ -257,8 +297,10 @@ class Bridge(CastStatusListener, MediaStatusListener):
                 stream_type=stream_type,
                 current_time=offset if (not live and offset > 0) else None,
                 metadata=metadata,
+                media_info={"customData": {"plugin": "sjfortin.nts-radio", "session": clean_session(session) or {}}},
             )
-            cast.media_controller.block_until_active(timeout=12)
+            # Status listeners confirm activation. Waiting here blocks the
+            # stdin loop and delays stop/pause and replacement selections.
         except Exception as exc:
             emit(event="error", message="could not start playback: {}".format(exc))
 
@@ -337,8 +379,13 @@ class Bridge(CastStatusListener, MediaStatusListener):
         content = ""
         position = 0.0
         duration = 0.0
+        session = None
         if cast is not None:
             status = cast.media_controller.status
+            custom = getattr(status, "media_custom_data", {}) or {}
+            if isinstance(custom, dict) and custom.get("plugin") == "sjfortin.nts-radio":
+                value = custom.get("session")
+                session = clean_session(value)
             content = clean(getattr(status, "content_id", ""), 400)
             # Both are None for live radio and for a session that has not
             # loaded yet; 0 reads the same to the UI as "no timeline".
@@ -355,13 +402,15 @@ class Bridge(CastStatusListener, MediaStatusListener):
             content=content,
             position=position,
             duration=duration,
+            session=session,
+            idleReason=clean(getattr(cast.media_controller.status, "idle_reason", ""), 30) if cast else "",
         )
 
     def new_cast_status(self, status):
         self._emit_status(volume_level=getattr(status, "volume_level", 0))
 
     def new_media_status(self, status):
-        self._emit_status(state=getattr(status, "player_state", "UNKNOWN"))
+        self._emit_status()
 
     def load_media_failed(self, item, error_code):
         emit(event="error", message="device rejected the stream (code {})".format(error_code))
@@ -418,7 +467,14 @@ def main():
                         message.get("live", True),
                         message.get("start", 0),
                         message.get("type", "audio/mpeg"),
+                        message.get("session"),
                     )
+                elif command == "status":
+                    cast = bridge.cast
+                    if cast is not None:
+                        cast.media_controller.update_status()
+                        if not message.get("fresh"):
+                            bridge._emit_status()
                 elif command == "seek":
                     bridge.seek(message.get("position", 0))
                 elif command == "pause":

@@ -1,5 +1,7 @@
 import QtQuick
+import "components" as Nts
 import qs.Commons
+import qs.Commons as Commons
 
 // The station mark: a hard-edged block of ink with the letters knocked out of
 // it when the stream is live, the same block as an outline when it is not.
@@ -13,8 +15,8 @@ Item {
 
   property string label: "NTS"
   property bool filled: true
-  property color ink: Color.foreground
-  property color paper: Color.background
+  property color ink: Commons.Color.foreground
+  property color paper: Commons.Color.background
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.caption
   property real paddingX: Style.spaceReal(4)

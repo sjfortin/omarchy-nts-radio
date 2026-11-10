@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 import "../components" as Nts
 import "../NtsApi.js" as NtsApi
@@ -19,7 +20,7 @@ Item {
 
   property var service: null
   property bool active: true
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
 
   signal showRequested(string alias)
   signal episodeRequested(var episode)
@@ -123,7 +124,7 @@ Item {
 
     Text {
       textFormat: Text.PlainText
-      text: "Saved"
+      text: Nts.Strings.t("Saved")
       color: root.ink
       font.family: Style.font.family
       font.pixelSize: Style.font.display
@@ -135,14 +136,14 @@ Item {
       spacing: Style.space(8)
 
       Nts.BlockButton {
-        label: "Shows"
+        label: Nts.Strings.t("Shows")
         filled: root.tab === "shows"
         ink: root.ink
         onActivated: root.tab = "shows"
       }
 
       Nts.BlockButton {
-        label: "Episodes"
+        label: Nts.Strings.t("Episodes")
         filled: root.tab === "episodes"
         ink: root.ink
         onActivated: root.tab = "episodes"
@@ -186,9 +187,9 @@ Item {
         ink: root.ink
         text: {
           if (root.tab === "shows" && root.shows.length === 0)
-            return "No saved shows yet — save one from any show page"
+            return Nts.Strings.t("No saved shows yet — save one from any show page")
           if (root.tab === "episodes" && root.episodes.length === 0)
-            return "No saved episodes yet — save one from any episode"
+            return Nts.Strings.t("No saved episodes yet — save one from any episode")
           return ""
         }
         actionLabel: (root.tab === "shows" ? root.shows.length : root.episodes.length) === 0
@@ -225,7 +226,7 @@ Item {
 
       Nts.BlockButton {
         visible: root.tab === "shows" && root.showLimit < root.shows.length
-        label: "Show more shows"
+        label: Nts.Strings.t("Show more shows")
         ink: root.ink
         onActivated: root.showLimit += 48
       }
@@ -261,7 +262,7 @@ Item {
 
       Nts.BlockButton {
         visible: root.tab === "episodes" && root.episodeLimit < root.episodes.length
-        label: "Show more episodes"
+        label: Nts.Strings.t("Show more episodes")
         ink: root.ink
         onActivated: root.episodeLimit += 80
       }

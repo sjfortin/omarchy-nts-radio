@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 import "../components" as Nts
 import "../NtsApi.js" as NtsApi
@@ -17,7 +18,7 @@ Item {
 
   property var service: null
   property bool active: true
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
 
   // The episode as the caller knew it. Replaced by the full record once the
   // detail request lands.
@@ -209,7 +210,7 @@ Item {
           Nts.Caption {
             ink: root.ink
             dim: 0.4
-            text: root.isCurrent ? "Now playing · Archive" : "Archive"
+            text: root.isCurrent ? Nts.Strings.t("Now playing · Archive") : Nts.Strings.t("Archive")
           }
 
           Text {
@@ -235,7 +236,7 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               ink: root.ink
               dim: 0.4
-              text: "From"
+              text: Nts.Strings.t("From")
             }
 
             Text {
@@ -301,7 +302,7 @@ Item {
             spacing: Style.space(8)
 
             Nts.BlockButton {
-              label: root.isPlaying ? "Pause" : (root.resumeAt > 0 && !root.isCurrent ? "Resume" : "Play")
+              label: root.isPlaying ? Nts.Strings.t("Pause") : (root.resumeAt > 0 && !root.isCurrent ? Nts.Strings.t("Resume") : Nts.Strings.t("Play"))
               filled: root.isPlaying
               ink: root.ink
               enabledAction: root.hasAudio
@@ -311,14 +312,14 @@ Item {
             // Only worth offering when resuming is what Play would do.
             Nts.BlockButton {
               visible: root.resumeAt > 0 && !root.isCurrent
-              label: "From start"
+              label: Nts.Strings.t("From start")
               ink: root.ink
               enabledAction: root.hasAudio
               onActivated: root.playFromStart()
             }
 
             Nts.BlockButton {
-              label: root.saved ? "Saved" : "Save"
+              label: root.saved ? Nts.Strings.t("Saved") : Nts.Strings.t("Save")
               filled: root.saved
               ink: root.ink
               enabledAction: root.episode !== null
@@ -326,7 +327,20 @@ Item {
             }
 
             Nts.BlockButton {
-              label: "Open on nts.live"
+              label: Nts.Strings.t("Play next")
+              ink: root.ink
+              enabledAction: root.hasAudio
+              onActivated: if (root.service) root.service.enqueueEpisode(root.episode, true)
+            }
+            Nts.BlockButton {
+              label: Nts.Strings.t("Queue")
+              ink: root.ink
+              enabledAction: root.hasAudio
+              onActivated: if (root.service) root.service.enqueueEpisode(root.episode, false)
+            }
+
+            Nts.BlockButton {
+              label: Nts.Strings.t("Open on nts.live")
               ink: root.ink
               enabledAction: root.episode !== null
               onActivated: if (root.service) root.service.openExternal(root.episode.url)
@@ -341,20 +355,20 @@ Item {
             visible: text !== ""
             text: {
               if (!root.episode) return ""
-              if (root.detailFailed) return "Could not update episode details"
+              if (root.detailFailed) return Nts.Strings.t("Could not update episode details")
               if (root.hasAudio) {
                 if (root.service && !root.service.ytdlAvailable)
-                  return "yt-dlp is not installed — omarchy pkg add yt-dlp"
+                  return Nts.Strings.t("yt-dlp is not installed — omarchy pkg add yt-dlp")
                 return ""
               }
               return root.detailLoaded
-                ? "NTS has no audio for this broadcast" : "Checking for audio…"
+                ? Nts.Strings.t("NTS has no audio for this broadcast") : Nts.Strings.t("Checking for audio…")
             }
           }
 
           Nts.BlockButton {
             visible: root.detailFailed
-            label: "Try again"
+            label: Nts.Strings.t("Try again")
             ink: root.ink
             onActivated: if (root.episode) root.fetchDetails(root.episode.showAlias,
               root.episode.episodeAlias)
@@ -365,7 +379,7 @@ Item {
             ink: root.ink
             dim: 0.45
             visible: root.resumeAt > 0 && !root.isCurrent
-            text: "Picks up at " + NtsApi.clockFromSeconds(root.resumeAt)
+            text: Nts.Strings.t("Picks up at ") + NtsApi.clockFromSeconds(root.resumeAt)
           }
         }
       }
@@ -379,7 +393,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Tracklist"
+          title: Nts.Strings.t("Tracklist")
           ink: root.ink
           aside: root.tracks.length + " tracks"
         }
@@ -397,7 +411,7 @@ Item {
       Nts.StateNote {
         width: parent.width
         ink: root.ink
-        text: root.loadingTracks ? "Loading tracklist" : ""
+        text: root.loadingTracks ? Nts.Strings.t("Loading tracklist") : ""
       }
     }
   }

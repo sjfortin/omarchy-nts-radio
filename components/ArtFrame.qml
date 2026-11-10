@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // Show artwork in a square, bordered frame.
 //
@@ -14,7 +15,7 @@ Rectangle {
   // Images are only given a source while something can actually see them.
   // Nothing should be fetching over the network for an off-screen row.
   property bool active: true
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   property int decodeWidth: 400
   // Drawn over the artwork on hover; the parent decides what it does.
   property bool showPlayAffordance: false
@@ -56,7 +57,7 @@ Rectangle {
     anchors.fill: parent
     anchors.margins: 1
     visible: root.showPlayAffordance && (root.hovered || root.playing)
-    color: Util.alpha(Color.background, root.playing ? 0.45 : 0.6)
+    color: Util.alpha(Commons.Color.background, root.playing ? 0.45 : 0.6)
 
     // A solid square while this is the thing on air, a triangle otherwise —
     // the same on-air language the bar widget uses.
@@ -66,7 +67,7 @@ Rectangle {
       width: Math.max(8, root.width * 0.14)
       height: width
       radius: 0
-      color: Color.foreground
+      color: Commons.Color.foreground
     }
 
     Canvas {
@@ -77,7 +78,7 @@ Rectangle {
       onPaint: {
         var ctx = getContext("2d")
         ctx.reset()
-        ctx.fillStyle = Color.foreground
+        ctx.fillStyle = Commons.Color.foreground
         ctx.beginPath()
         ctx.moveTo(0, 0)
         ctx.lineTo(width, height / 2)

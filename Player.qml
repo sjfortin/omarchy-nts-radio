@@ -99,6 +99,7 @@ Item {
 
   // The recording ran out. A live stream cannot raise this.
   signal finished()
+  signal checkpoint(string stage)
 
   // ---------------------------------------------------------------- state
 
@@ -116,6 +117,10 @@ Item {
   // A stop we asked for on the way to starting a new one. Without this the
   // exit reads as a dropped stream and flashes an error the user never had.
   property bool restarting: false
+  property bool completionPending: false
+  property bool processActive: false
+  property string processMode: "live"
+  readonly property int loadRequestId: 900003
 
   // -------------------------------------------------------------- control
 
@@ -148,6 +153,14 @@ Item {
   }
 
   function pause() {
+    // Cancel a load in flight. A later per-file pause=no must not undo the
+    // user's pause after an asynchronous loadfile finally completes.
+    if (loading) {
+      if (isArchive) startPositionSec = positionSec
+      stop()
+      paused = true
+      return
+    }
     if (!mpv.running) {
       wanted = false
       paused = true
@@ -173,6 +186,10 @@ Item {
 
   function stop() {
     wanted = false
+    completionPending = false
+    retryAfterFailure.stop()
+    restartAfterStop.stop()
+    rejoinGuard.stop()
     restarting = false
     paused = false
     connectedToStream = false
@@ -190,12 +207,14 @@ Item {
   }
 
   // Move the player between media. Unlike switchStream — which swaps one live
-  // channel for another under a running process — this always tears the
-  // process down, because the mode decides the mpv command line: whether the
-  // ytdl hook is loaded at all, and where playback starts.
+  // channel for another under a running process — changing modes rebuilds
+  // the process for its mode-specific options. Archive replacements reuse
+  // the process and pass the resume offset as a per-file option.
   function loadSource(newMode, url, startSec) {
-    var hadProcess = mpv.running
-    if (hadProcess) {
+    completionPending = false
+    var hadProcess = processActive
+    var canReuse = mpv.running && ipcAvailable && processMode === newMode && newMode === "archive"
+    if (hadProcess && !canReuse) {
       // A stop we are about to follow with a start. Without this the exit
       // reads as a dropped stream and flashes an error nobody had.
       restarting = true
@@ -217,7 +236,13 @@ Item {
     lastError = ""
     wanted = true
 
-    if (hadProcess) restartAfterStop.restart()
+    if (canReuse) {
+      rejoining = true
+      ipcSocket.write(Model.ipcCommand(["loadfile", archiveUrl, "replace", -1,
+        { start: String(startPositionSec), pause: "no", "force-media-title": mediaTitle }], loadRequestId))
+      ipcSocket.flush()
+      rejoinGuard.restart()
+    } else if (hadProcess) restartAfterStop.restart()
     else startProcess()
   }
 
@@ -241,6 +266,8 @@ Item {
     }
     // No IPC: restart at the target, which lands in the same place.
     startPositionSec = target
+    wanted = true
+    paused = false
     if (mpv.running) {
       restarting = true
       mpv.running = false
@@ -264,7 +291,11 @@ Item {
   readonly property string activeUrl: isArchive ? archiveUrl : streamUrl
 
   function startProcess() {
-    if (activeUrl === "") return
+    if (activeUrl === "" || !wanted) return
+    if (processActive) { restarting = true; restartAfterStop.restart(); return }
+    processActive = true
+    processMode = mode
+    retryAfterFailure.stop()
     restarting = false
     connectAttempts = 0
     ipcGaveUp = false
@@ -373,6 +404,7 @@ Item {
   function onIpcReady() {
     if (!ipcAvailable || ipcInitialized) return
     ipcInitialized = true
+    checkpoint("ipc-ready")
     ipcConnect.stop()
     observeProperties()
     send(["set_property", "volume", Model.clampVolume(volume)])
@@ -423,6 +455,12 @@ Item {
   function handleLine(line) {
     var message = Model.parseIpcLine(line)
     if (!message) return
+    if (message.request_id === loadRequestId && message.error !== "success") {
+      restarting = true
+      mpv.running = false
+      restartAfterStop.restart()
+      return
+    }
 
     // A reply to one of the position polls above.
     if (message.request_id === positionRequestId || message.request_id === durationRequestId) {
@@ -437,7 +475,9 @@ Item {
     }
 
     if (message.event === "file-loaded") {
+      checkpoint("file-loaded")
       rejoining = false
+      rejoinGuard.stop()
       retryCount = 0
       lastError = ""
       // The --start= seek has been applied by now, so it must not be applied
@@ -448,11 +488,11 @@ Item {
     if (message.event === "end-file") {
       // Only an archive can legitimately end. `reason` distinguishes the
       // recording running out from an error or from our own loadfile.
-      if (isArchive && String(message.reason || "") === "eof") {
+      if (isArchive && !rejoining && String(message.reason || "") === "eof") {
         wanted = false
         connectedToStream = false
         positionSec = durationSec
-        root.finished()
+        completionPending = true
       }
       return
     }
@@ -465,6 +505,8 @@ Item {
       if (isPaused) {
         connectedToStream = false
         wanted = false
+      } else if (isArchive) {
+        wanted = true
       } else if (!rejoining) {
         // Someone outside this plugin resumed us — a media key, playerctl,
         // another MPRIS client. Rejoin the live edge rather than replaying
@@ -476,6 +518,7 @@ Item {
 
     if (message.name === "core-idle") {
       connectedToStream = message.data === false
+      if (connectedToStream && wanted) checkpoint("playback-ready")
       return
     }
 
@@ -515,6 +558,7 @@ Item {
 
   Process {
     id: mpv
+    objectName: "mpv"
     running: false
 
     // With --terminal=yes and --msg-level=all=error, anything mpv prints is
@@ -539,16 +583,26 @@ Item {
     }
 
     onStarted: {
+      root.checkpoint("process-started")
       root.connectAttempts = 0
       ipcConnect.restart()
+      ipcLoader.active = true
     }
 
     onExited: function(exitCode, exitStatus) {
+      root.processActive = false
       root.closeIpc()
       root.connectedToStream = false
       root.ipcGaveUp = false
       if (root.restarting) {
         root.restarting = false
+        restartAfterStop.stop()
+        Qt.callLater(function() { if (root.wanted) root.startProcess() })
+        return
+      }
+      if (root.completionPending) {
+        root.completionPending = false
+        root.finished()
         return
       }
       if (root.paused) return
@@ -639,7 +693,7 @@ Item {
   // A loadfile that never reports back means the reload did not take.
   Timer {
     id: rejoinGuard
-    interval: 8000
+    interval: root.isArchive ? 45000 : 8000
     onTriggered: {
       if (!root.rejoining) return
       root.rejoining = false
@@ -653,8 +707,8 @@ Item {
 
   Timer {
     id: restartAfterStop
-    interval: 400
-    onTriggered: if (root.wanted) root.startProcess()
+    interval: 50
+    onTriggered: if (root.wanted && !root.processActive) root.startProcess()
   }
 
   // 5s, 15s, 45s, then every 60s. Long enough that a laptop with the lid

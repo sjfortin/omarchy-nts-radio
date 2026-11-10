@@ -176,7 +176,36 @@ Item {
     // already happening and we take the output back so the panel can stop it
     // — abandoning it would leave a speaker playing with nothing to control
     // it. If it is not, we stay local and nothing has started.
-    if (lastSessionOutput === "cast" && castUuid !== "") caster.adoptExistingSession()
+    if (lastSessionOutput === "cast" && castUuid !== "") beginRecovery()
+  }
+
+  property bool recoveryPending: false
+  property int recoveryAttempts: 0
+  readonly property bool recoveringCast: recoveryPending || caster.adopting
+
+  function beginRecovery() {
+    recoveryPending = true
+    recoveryAttempts = 0
+    probeRecovery()
+  }
+
+  function probeRecovery() {
+    if (!recoveryPending || castUuid === "" || playbackRequested) return
+    recoveryAttempts++
+    caster.targetUuid = castUuid
+    caster.adoptExistingSession()
+  }
+
+  function cancelRecovery() {
+    recoveryPending = false
+    recoveryRetry.stop()
+    caster.adopting = false
+  }
+
+  Timer {
+    id: recoveryRetry
+    interval: 30000
+    onTriggered: root.probeRecovery()
   }
 
   // Live edits from the bar's own settings form land here too, so changing
@@ -196,6 +225,7 @@ Item {
     }
     if (values.refreshMinutes !== undefined)
       refreshMinutes = Math.max(1, Math.min(30, Math.floor(Number(values.refreshMinutes)) || 1))
+    if (values.followSavedShows !== undefined) followSavedShows = values.followSavedShows === true
     if (values.scrollSpeed !== undefined)
       scrollSpeed = Math.max(25, Math.min(400, Math.floor(Number(values.scrollSpeed)) || 100))
     if (values.castDevice !== undefined) {
@@ -219,7 +249,8 @@ Item {
       channel: Model.channelSettingValue(channel),
       volume: Model.clampVolume(castVolume),
       scrollSpeed: scrollSpeed,
-      output: outputMode,
+      followSavedShows: followSavedShows,
+      output: recoveringCast ? lastSessionOutput : outputMode,
       castDevice: castUuid,
       castDeviceName: castName
     }
@@ -360,6 +391,11 @@ Item {
         liveFetch.running = false
       }
       root.refresh()
+      if (root.castingAudio && !root.archiveIsLocal && root.castUuid !== "") {
+        root.recoveryPending = true
+        root.playbackRequested = false
+        root.probeRecovery()
+      }
     }
   }
 
@@ -436,6 +472,11 @@ Item {
   // Turning an episode page into something a device can fetch takes a
   // subprocess and a second or two, during which nothing is playing yet.
   property bool resolvingCast: false
+  property bool archiveNeedsLoad: false
+  property real deferredPositionSec: 0
+  property bool playbackRequested: false
+  readonly property string loadingStage: resolvingCast ? "Resolving episode"
+    : (loading ? (castingAudio && !castConnected ? "Connecting to speaker" : "Buffering") : "")
 
   // Every playback question routes to whichever backend owns the audio, so
   // the widget and panel never have to know which one that is.
@@ -450,7 +491,14 @@ Item {
 
   // A newly playing local stream takes audio focus from Crate. Cast audio
   // stays on its own device and does not interrupt music on this computer.
-  onPlayingChanged: if (playing && !castingAudio) claimLocalAudio()
+  onPlayingChanged: {
+    if (playing) { playbackRequested = true; notePlaybackStage("playing") }
+    if (playing && !castingAudio) claimLocalAudio()
+    if (playing && archiveMode && hasArchiveEpisode && libraryLoaded) {
+      library = Library.notePlayed(library, archiveEpisode, Date.now())
+      saveLibrary()
+    }
+  }
   onCastingAudioChanged: {
     syncOutputVolume()
     if (!castingAudio && playing) claimLocalAudio()
@@ -477,7 +525,7 @@ Item {
 
   // Position and length, in seconds. Both are 0 for live, which has neither.
   readonly property real positionSec: !archiveMode ? 0
-    : (castingAudio ? caster.positionSec : player.positionSec)
+    : (archiveNeedsLoad || resolvingCast ? deferredPositionSec : (castingAudio ? caster.positionSec : player.positionSec))
   readonly property real durationSec: !archiveMode ? 0
     : (castingAudio ? caster.durationSec : player.durationSec)
   readonly property bool canSeek: archiveMode && durationSec > 0
@@ -493,12 +541,39 @@ Item {
   readonly property bool castConnected: caster.connected
   readonly property string castTargetName: caster.targetName || castName
 
+  property double playbackRequestMs: 0
+  property var playbackTimings: []
+
+  function beginPlaybackTrace() {
+    playbackRequestMs = Date.now()
+    playbackTimings = []
+    notePlaybackStage("request")
+  }
+
+  function notePlaybackStage(stage) {
+    if (playbackRequestMs <= 0) return
+    var next = playbackTimings.slice(-23)
+    next.push({ stage: stage, elapsedMs: Math.max(0, Date.now() - playbackRequestMs) })
+    playbackTimings = next
+  }
+
   function play() {
+    beginPlaybackTrace()
+    cancelRecovery()
+    playbackRequested = true
+    if (archiveMode && archiveNeedsLoad && hasArchiveEpisode) {
+      playEpisode(archiveEpisode, deferredPositionSec)
+      return
+    }
     if (archiveMode) {
       // The episode is already loaded; this is a resume, and it belongs to
       // whichever backend is holding it.
-      if (castingAudio) caster.resume()
-      else player.play()
+      if (castingAudio) {
+        if (!caster.connected || !caster.wanted || caster.deviceState === "IDLE") {
+          var resumeAt = durationSec > 0 && positionSec >= durationSec * 0.97 ? 0 : positionSec
+          playEpisode(archiveEpisode, resumeAt)
+        } else caster.resume()
+      } else player.play()
       return
     }
     if (castingAudio) {
@@ -512,6 +587,17 @@ Item {
   }
 
   function pause() {
+    cancelRecovery()
+    playbackRequested = false
+    if (resolvingCast || (archiveMode && castingAudio && loading && !playing)) {
+      deferredPositionSec = positionSec
+      resolver.abort()
+      resolvingCast = false
+      archiveNeedsLoad = true
+      caster.stop()
+      saveProgress()
+      return
+    }
     if (archiveMode) {
       // Note where it stopped before the process can be reaped, so the shelf
       // is right even if the user never comes back to it this session. An
@@ -549,16 +635,21 @@ Item {
       return false
     }
 
+    // Save the previous position while the deferred/resolving state still
+    // identifies its clock correctly.
+    if (archiveMode && hasArchiveEpisode && !NtsApi.sameEpisode(archiveEpisode, episode)) saveProgress()
+    cancelRecovery()
+    resolver.abort()
+    resolvingCast = false
+    archiveNeedsLoad = false
+    playbackRequested = true
+    beginPlaybackTrace()
     archiveError = ""
-
-    // Leaving one episode for another: record where we got to in the old one
-    // before its position is overwritten.
-    if (archiveMode && hasArchiveEpisode && !NtsApi.sameEpisode(archiveEpisode, episode))
-      saveProgress()
 
     var resume = Number(startSec)
     if (!isFinite(resume) || resume < 0) resume = Library.resumePosition(library, episode)
 
+    deferredPositionSec = resume
     archiveEpisode = episode
     playbackMode = "archive"
     // Assume the chosen output until resolution says otherwise.
@@ -569,6 +660,7 @@ Item {
       // The device cannot resolve a SoundCloud page, so it has to be turned
       // into fetchable audio here first. Nothing plays until it comes back.
       player.stop()
+      caster.stop()
       resolvingCast = true
       pendingResumeSec = resume
       resolver.start(episode.audioUrl)
@@ -587,8 +679,9 @@ Item {
     target: resolver
 
     function onResolved(source, url, contentType) {
-      if (!root.archiveMode || !root.hasArchiveEpisode) return
+      if (!root.resolvingCast || !root.playbackRequested || !root.casting || !root.archiveMode || !root.hasArchiveEpisode) return
       if (source !== root.archiveEpisode.audioUrl) return
+      root.notePlaybackStage("resolved")
       root.resolvingCast = false
       root.archiveIsLocal = false
       caster.mediaContentType = contentType
@@ -597,7 +690,7 @@ Item {
     }
 
     function onFailed(source, reason) {
-      if (!root.archiveMode || !root.hasArchiveEpisode) return
+      if (!root.resolvingCast || !root.playbackRequested || !root.casting || !root.archiveMode || !root.hasArchiveEpisode) return
       if (source !== root.archiveEpisode.audioUrl) return
       root.resolvingCast = false
       // The episode exists but nothing about it is castable. Rather than
@@ -609,10 +702,13 @@ Item {
     }
   }
 
-  Resolver { id: resolver }
+  Resolver { id: resolver; objectName: "resolver" }
 
   // Back to live radio, optionally on a specific channel.
   function playLive(number) {
+    cancelRecovery()
+    playbackRequested = true
+    archiveNeedsLoad = false
     var wanted = number === undefined ? channel : Model.channelNumber(number)
     // Whatever went wrong with the archive is no longer on screen or on the
     // air, so the message should not outlive it.
@@ -641,6 +737,11 @@ Item {
 
   function seekTo(seconds) {
     if (!archiveMode) return
+    if (archiveNeedsLoad || resolvingCast) {
+      deferredPositionSec = Math.max(0, Number(seconds) || 0)
+      pendingResumeSec = deferredPositionSec
+      return
+    }
     if (castingAudio) caster.seekTo(seconds)
     else player.seekTo(seconds)
     // A scrub is a deliberate move; remember it straight away rather than
@@ -711,6 +812,7 @@ Item {
   // Moving the audio between this machine and a device. Playback follows the
   // move: if it was playing, it is playing when the move finishes.
   function setOutput(mode, uuid, name) {
+    cancelRecovery()
     var wantedMode = Model.outputModeFromSetting(mode)
     var wantedUuid = wantedMode === "cast" ? Model.plainText(uuid, 80) : ""
     // Switching to local keeps the remembered device, so comparing uuids
@@ -726,6 +828,7 @@ Item {
     // reload at the current position rather than a handover.
     if (archiveMode && hasArchiveEpisode) {
       var resumeAt = positionSec
+      var shouldPlay = playbackRequested && (playing || loading)
       if (castingAudio) caster.stop()
       else player.stop()
       resolvingCast = false
@@ -738,7 +841,12 @@ Item {
         caster.selectDevice(castUuid, castName)
       }
       requestPersist()
-      playEpisode(archiveEpisode, resumeAt)
+      if (shouldPlay) playEpisode(archiveEpisode, resumeAt)
+      else {
+        deferredPositionSec = resumeAt
+        archiveNeedsLoad = true
+        archiveIsLocal = wantedMode === "local"
+      }
       return
     }
 
@@ -842,13 +950,142 @@ Item {
     Quickshell.execDetached(["xdg-open", target])
   }
 
+  // ------------------------------------------------------ listening controls
+
+  property double sleepDeadlineMs: 0
+  property bool sleepAtEpisodeEnd: false
+  property int sleepRemainingMinutes: 0
+  readonly property var queue: library.queue || []
+  readonly property var history: library.history || []
+
+  function setSleepTimer(minutes) {
+    var value = Math.max(0, Math.min(240, Number(minutes) || 0))
+    sleepAtEpisodeEnd = false
+    sleepDeadlineMs = value > 0 ? Date.now() + value * 60000 : 0
+    updateSleepTimer()
+  }
+
+  function setSleepAtEnd() {
+    sleepDeadlineMs = 0
+    sleepRemainingMinutes = 0
+    sleepAtEpisodeEnd = archiveMode
+  }
+
+  function updateSleepTimer() {
+    sleepRemainingMinutes = sleepDeadlineMs > 0 ? Math.max(0, Math.ceil((sleepDeadlineMs - Date.now()) / 60000)) : 0
+    if (sleepDeadlineMs > 0 && Date.now() >= sleepDeadlineMs) {
+      sleepDeadlineMs = 0
+      pause()
+    }
+  }
+
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.sleepDeadlineMs > 0
+    onTriggered: root.updateSleepTimer()
+  }
+
+  function enqueueEpisode(episode, atFront) {
+    if (!libraryLoaded) return
+    library = Library.enqueue(library, episode, atFront === true)
+    saveLibrary()
+  }
+
+  function removeQueued(index) { library = Library.removeQueued(library, index); saveLibrary() }
+  function moveQueued(index, delta) { library = Library.moveQueued(library, index, delta); saveLibrary() }
+  function clearQueue() { library = Object.assign({}, library, { queue: [] }); saveLibrary() }
+  function clearHistory() { library = Library.clearHistory(library); saveLibrary() }
+
+  function playNextQueued() { return playQueued(0) }
+
+  function playQueued(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= queue.length) return false
+    var episode = queue[index]
+    if (!playEpisode(episode, 0)) return false
+    library = Library.removeQueued(library, index)
+    saveLibrary()
+    return true
+  }
+
+  function episodeFinished() {
+    if (!archiveMode || !hasArchiveEpisode) return
+    library = Library.clearResume(library, archiveEpisode)
+    saveLibrary()
+    playbackRequested = false
+    if (sleepAtEpisodeEnd) {
+      sleepAtEpisodeEnd = false
+      pause()
+      return
+    }
+    Qt.callLater(function() { if (!root.playbackRequested) root.playNextQueued() })
+  }
+
+  // Optional, rate-limited discovery of saved shows. At most 20 shows per
+  // hourly pass, one request at a time; large libraries rotate across passes.
+  property bool followSavedShows: false
+  property var followedEpisodes: []
+  property bool refreshingFollowed: false
+  property int followedCursor: 0
+  property int followedGeneration: 0
+  property double followedFetchedAt: 0
+
+  function refreshFollowed() {
+    if (!followSavedShows || refreshingFollowed || !libraryLoaded) return
+    var shows = library.shows
+    if (shows.length === 0) { followedEpisodes = []; return }
+    var token = ++followedGeneration
+    var batch = []
+    for (var i = 0; i < Math.min(20, shows.length); i++) batch.push(shows[(followedCursor + i) % shows.length])
+    followedCursor = (followedCursor + batch.length) % shows.length
+    refreshingFollowed = true
+    function next(index) {
+      if (token !== root.followedGeneration || !root.followSavedShows) return
+      if (index >= batch.length) {
+        root.refreshingFollowed = false
+        root.followedFetchedAt = Date.now()
+        return
+      }
+      var show = batch[index]
+      apiClient.showEpisodes(show.alias, 3, 0, function(result, ok) {
+        if (token !== root.followedGeneration || !root.followSavedShows) return
+        if (ok && result && Library.hasShow(root.library, show.alias)) {
+          var items = root.followedEpisodes.filter(function(entry) { return entry.showAlias !== show.alias })
+          for (var j = 0; j < result.episodes.length; j++) {
+            var item = result.episodes[j]
+            item.showName = show.name
+            items.push(item)
+          }
+          items.sort(function(a, b) { return b.broadcastMs - a.broadcastMs })
+          root.followedEpisodes = items.slice(0, 60)
+        }
+        next(index + 1)
+      })
+    }
+    next(0)
+  }
+
+  onFollowSavedShowsChanged: {
+    followedGeneration++
+    refreshingFollowed = false
+    if (followSavedShows) refreshFollowed()
+    else followedEpisodes = []
+  }
+
+  Timer {
+    interval: 3600000
+    repeat: true
+    running: root.followSavedShows
+    onTriggered: root.refreshFollowed()
+  }
+
   // -------------------------------------------------------------- api client
 
   // The one place the plugin talks to nts.live. Pages ask this for parsed
   // results; nothing else in the plugin opens a socket.
   readonly property alias api: apiClient
 
-  Api { id: apiClient }
+  Api { id: apiClient; objectName: "apiClient" }
 
   // ----------------------------------------------------------------- library
 
@@ -872,9 +1109,101 @@ Item {
     libraryFile.setText(Library.serialize(library) + "\n")
   }
 
+  property string libraryTransferMessage: ""
+  property var importPreview: null
+  property string importBody: ""
+  property bool transferBusy: false
+
+  function chosenJsonPath(url) {
+    var value = String(url || "")
+    if (value.indexOf("file:///") === 0) {
+      try { value = decodeURIComponent(value.slice(7)) } catch (e) { return "" }
+    }
+    return value.charAt(0) === "/" && /\.json$/i.test(value) && value.indexOf("\u0000") < 0 ? value : ""
+  }
+
+  function exportLibrary(url) {
+    var path = chosenJsonPath(url)
+    if (!libraryLoaded || transferBusy || !path) return false
+    transferBusy = true
+    libraryTransferMessage = "Exporting library…"
+    exportFile.path = path
+    exportFile.setText(Library.serialize(library) + "\n")
+    return true
+  }
+
+  function previewImport(url) {
+    var path = chosenJsonPath(url)
+    if (!libraryLoaded || transferBusy || !path) return false
+    transferBusy = true
+    importPreview = null
+    importBody = ""
+    libraryTransferMessage = "Reading backup…"
+    importReader.command = ["python3", pluginDir + "/scripts/library_io.py", path]
+    importReader.running = true
+    return true
+  }
+
+  function applyImport() {
+    if (!importPreview || transferBusy || !libraryLoaded) return
+    transferBusy = true
+    libraryTransferMessage = "Backing up current library…"
+    beforeImportFile.setText(Library.serialize(library) + "\n")
+  }
+
+  FileView {
+    id: exportFile
+    path: ""
+    preload: false
+    atomicWrites: true
+    printErrors: false
+    onSaved: { root.transferBusy = false; root.libraryTransferMessage = "Library exported" }
+    onSaveFailed: { root.transferBusy = false; root.libraryTransferMessage = "Could not write the backup" }
+  }
+
+  FileView {
+    id: beforeImportFile
+    path: root.libraryDir + "/library-before-import.json"
+    preload: false
+    atomicWrites: true
+    printErrors: false
+    onSaved: {
+      root.library = root.importPreview
+      root.importPreview = null
+      root.saveLibrary()
+      root.transferBusy = false
+      root.libraryTransferMessage = "Library imported; previous library backed up"
+      root.followedEpisodes = []
+      root.followedGeneration++
+      root.refreshingFollowed = false
+      root.refreshFollowed()
+    }
+    onSaveFailed: { root.transferBusy = false; root.libraryTransferMessage = "Could not back up current library; import cancelled" }
+  }
+
+  Process {
+    id: importReader
+    objectName: "importReader"
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.importBody = String(text || "")
+    }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(code, status) {
+      root.transferBusy = false
+      root.importPreview = code === 0 ? Library.importLibrary(root.importBody) : null
+      root.importBody = ""
+      root.libraryTransferMessage = root.importPreview
+        ? "Review the backup before replacing your library"
+        : "Invalid or unreadable library backup (maximum 4 MB)"
+    }
+  }
+
   function toggleSaveShow(show) {
     if (!show || !show.alias) return
     library = Library.toggleShow(library, show, Date.now())
+    followedEpisodes = followedEpisodes.filter(function(entry) { return Library.hasShow(root.library, entry.showAlias) })
+    if (followSavedShows && Date.now() - followedFetchedAt > 300000) refreshFollowed()
     saveLibrary()
   }
 
@@ -916,10 +1245,11 @@ Item {
     // The recording ran out. Clear the resume entry so it does not sit on the
     // "continue listening" shelf at 99%, and leave the episode loaded so the
     // UI still shows what just finished.
+    function onCheckpoint(stage) { root.notePlaybackStage(stage) }
+
     function onFinished() {
       if (!root.archiveMode || !root.hasArchiveEpisode) return
-      root.library = Library.clearResume(root.library, root.archiveEpisode)
-      root.saveLibrary()
+      root.episodeFinished()
     }
   }
 
@@ -937,6 +1267,7 @@ Item {
 
   FileView {
     id: libraryFile
+    objectName: "libraryFile"
     path: root.libraryPath
     watchChanges: false
     // The library is rewritten in full on every change; a torn file after a
@@ -947,10 +1278,16 @@ Item {
     onLoaded: {
       root.library = Library.load(text())
       root.libraryLoaded = true
+      root.refreshFollowed()
     }
 
     // No file yet, or an unreadable one. Either way an empty library is the
     // right starting point — never a reason to keep the browser from opening.
+    onSaveFailed: {
+      root.transferBusy = false
+      root.libraryTransferMessage = "Could not save the library — check directory permissions"
+    }
+
     onLoadFailed: function(error) {
       root.library = Library.emptyLibrary()
       root.libraryLoaded = true
@@ -967,11 +1304,13 @@ Item {
 
   Player {
     id: player
+    objectName: "player"
     pausedShutdownSeconds: 300
   }
 
   Caster {
     id: caster
+    objectName: "caster"
     pluginDir: root.pluginDir
     // The bridge is a Python process; it runs only while a panel is showing
     // device choices or a cast is actually in progress.
@@ -992,6 +1331,9 @@ Item {
          ? root.archiveEpisode.name
          : NtsApi.dateLabel(root.archiveEpisode.broadcastMs))
       : (root.now ? Model.barTitle(root.now) : "")
+    sessionMetadata: root.archiveMode && root.hasArchiveEpisode
+      ? { mode: "archive", episode: Library.savedEpisodeFromEntry(root.archiveEpisode) }
+      : { mode: "live", channel: root.channel }
     artworkUrl: root.archiveMode && root.hasArchiveEpisode
       ? root.archiveEpisode.artworkLarge : (root.now ? root.now.artworkLarge : "")
   }
@@ -1023,12 +1365,50 @@ Item {
     // so in shell.json: without this, a session that once ended while casting
     // would start a discovery on every shell restart forever, asking a
     // question that was already answered.
-    function onAdoptingChanged() {
-      if (caster.adopting) return
-      if (root.casting || root.lastSessionOutput !== "cast") return
-      root.lastSessionOutput = "local"
+    function onSessionRecovered(session, wasPaused) {
+      if (!root.recoveryPending || !caster.adopting) return
+      if (session.mode === "archive") {
+        var episode = Library.savedEpisodeFromEntry(session.episode)
+        if (!episode || !episode.audioUrl) {
+          caster.wanted = false
+          root.cancelRecovery()
+          return
+        }
+        root.archiveEpisode = episode
+        root.playbackMode = "archive"
+        root.archiveIsLocal = false
+        root.archiveNeedsLoad = false
+      } else {
+        root.playbackMode = "live"
+        root.archiveEpisode = null
+        root.channel = Model.channelNumber(session.channel)
+      }
+      root.outputMode = "cast"
+      root.playbackRequested = !wasPaused
+      root.recoveryPending = false
+      recoveryRetry.stop()
       root.requestPersist()
+      root.refreshIfStale()
     }
+
+    function onRecoveryAbsent() {
+      root.recoveryPending = false
+      recoveryRetry.stop()
+      if (!root.casting) {
+        root.lastSessionOutput = "local"
+        root.requestPersist()
+      }
+    }
+
+    function onAdoptingChanged() {
+      if (caster.adopting || !root.recoveryPending) return
+      // The network may not be ready at login or immediately after wake.
+      // Keep the remembered output on an inconclusive timeout.
+      if (root.recoveryAttempts < 10) recoveryRetry.restart()
+      else root.recoveryPending = false
+    }
+
+    function onFinished() { root.episodeFinished() }
 
     // Remember a device the moment it is actually connected, name included,
     // so the next session can reconnect without a discovery round trip.
@@ -1135,6 +1515,21 @@ Item {
   IpcHandler {
     target: "nts-radio"
 
+    function sleep(minutes: string): string {
+      if (minutes === "end") root.setSleepAtEnd()
+      else {
+        var value = Number(minutes)
+        if (!isFinite(value) || value < 0 || value > 240) return "Use 0–240 minutes or end"
+        root.setSleepTimer(value)
+      }
+      return "ok"
+    }
+    function playNext(): void { root.playNextQueued() }
+    function clearQueue(): void { root.clearQueue() }
+    function retry(): void {
+      if (root.archiveMode && root.hasArchiveEpisode) root.playEpisode(root.archiveEpisode, root.positionSec)
+      else root.play()
+    }
     function play(): void { root.play() }
     function pause(): void { root.pause() }
     function pauseLocal(): void {
@@ -1164,7 +1559,7 @@ Item {
     //   omarchy-shell nts-radio open saved
     function open(page: string): string {
       var wanted = String(page || "").trim().toLowerCase()
-      if (["home", "search", "saved"].indexOf(wanted) === -1) wanted = "home"
+      if (["home", "search", "saved", "listening"].indexOf(wanted) === -1) wanted = "home"
       return root.openBrowser(wanted) ? wanted : "unavailable"
     }
 
@@ -1254,6 +1649,12 @@ Item {
         channel: root.channel,
         playing: root.playing,
         loading: root.loading,
+        loadingStage: root.loadingStage,
+        playbackTimings: root.playbackTimings,
+        recoveringCast: root.recoveringCast,
+        queueLength: root.queue.length,
+        historyLength: root.history.length,
+        sleep: { minutes: root.sleepRemainingMinutes, atEpisodeEnd: root.sleepAtEpisodeEnd },
         volume: root.volume,
         output: root.outputMode,
         archive: root.archiveMode && root.hasArchiveEpisode ? {
@@ -1313,7 +1714,7 @@ Item {
     // Last chance to remember where an archive got to: the plugin is being
     // disabled or the shell is going down, and mpv is about to be killed.
     saveProgress()
-    caster.stop()
+    caster.shutdown()
     player.stop()
     // mpv does not unlink its IPC socket on exit. Harmless (it lives in the
     // runtime dir and the next mpv rebinds it), but leaving files behind

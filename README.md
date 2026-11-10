@@ -8,7 +8,9 @@ the top bar, and a browser window for the archive.
 - Live radio in the bar, with the current broadcast title and playback controls.
 - A browser window for the archive: search, show pages, episode pages,
   tracklists.
-- A local library of saved shows and episodes, with resume positions.
+- A local library of saved shows and episodes, with resume positions and history.
+- A persistent episode queue, sleep timer, and optional saved-show updates.
+- Validated library backup export/import and cast session recovery after restart.
 - Audio plays locally through mpv, or on a Chromecast device that fetches the
   stream itself.
 - Media keys and MPRIS, a scriptable IPC surface, and an optional launcher
@@ -74,13 +76,14 @@ NTS Radio works the same when Crate is not installed.
 omarchy-shell nts-radio browser
 ```
 
-Three destinations in the left rail, with both live channels always one click
+Four destinations in the left rail, with both live channels always one click
 away:
 
 - **Home**: what is on air, what you were part way through, your saved shows,
   and NTS Picks / Recently added.
 - **Search**: grouped results across shows, episodes, tracks and tags.
 - **Saved**: your library, in two tabs.
+- **Listening**: queue, listening history, sleep timer, and library tools.
 
 Clicking a row opens it. Clicking its artwork plays it.
 
@@ -99,7 +102,7 @@ this table:
 | `Ctrl-Tab` | switch result groups or Saved tabs |
 | `Space` | play or pause, or activate a focused control |
 | `1` `2` | live NTS 1 / NTS 2 |
-| `h` `s` | Home / Saved |
+| `h` `s` `q` | Home / Saved / Listening |
 | `←` `→` | scrub an archived show by 30s |
 | `Esc` | back, then close |
 | `Ctrl-W` | close |
@@ -139,6 +142,43 @@ never uploaded are listed with *No audio*.
 [Supporter](https://www.nts.live/supporters) benefit. Their API returns them
 without asking who is calling, so the plugin discards them at the parser.
 
+## Queue, history and sleep
+
+Open **Listening** in the rail, press `q`, or use the Listening button below
+the transport. Episode pages offer **Play next** (front of queue) and **Queue**
+(end); episode rows also offer Queue. The queue holds up to 100 episodes and is
+saved across restarts. It does not start automatically at login. Use **Start
+queue**, reorder or remove items, or use **Next** in the transport. Playing a
+queued row removes that item from the queue. When an archive finishes, the next
+queued episode starts on the current output.
+
+History holds up to 200 distinct archived episodes that reached playback. It
+stays on this computer, and **Clear history** removes it. History and queue
+travel with the library backup.
+
+Choose a 15, 30 or 60 minute sleep timer, or **At episode end**. The latter
+pauses at completion and leaves the queue untouched. **Off** cancels the timer;
+IPC also accepts any duration up to 240 minutes. Timers are session-only and
+require this computer and the plugin to stay running and awake. The speaker
+cannot execute a timer while its controller is shut down. If the computer
+sleeps through a deadline, the timer stops playback after it wakes.
+
+Under **Listening → Library tools**, **Saved-show updates** optionally checks
+up to 20 saved shows per hour, one request at a time. Larger libraries rotate
+across passes. Home displays up to 12 recent episodes from the fetched shows.
+The setting is off by default and can also be changed in the plugin settings.
+
+**Export library** writes a JSON backup to your selected file. **Import backup**
+reads at most 4 MB, validates and sanitizes the data, and shows a preview before
+replacement. Applying it first saves the current library to
+`~/.local/state/omarchy/nts-radio/library-before-import.json`. Version 1 backups
+remain supported. Importing replaces saved shows, episodes, resume positions,
+history and queue; it does not change current playback. Import needs Python 3.
+
+The browser shows Resolving / Connecting / Buffering while loading, with a
+Cancel transport action and Retry after errors. Rapid selections follow the
+latest episode; cancelling a pending start prevents it from playing later.
+
 ## Casting
 
 Radio always starts on this computer. Casting is a deliberate choice each
@@ -165,10 +205,22 @@ and stay seekable on the device.
 - A few episodes only publish formats no Chromecast can decode. Those fall back
   to playing here, and the panel says so.
 
-A cast outlives the shell, so if the last session ended while casting, the
-plugin asks that device once whether it is still playing. If it is, the panel
-takes the session back so you can stop it. It only ever adopts a stream it
-recognises, so it will not take over someone else's music.
+A cast outlives the shell and the computer. After restart, the plugin checks
+its remembered speaker and adopts a recognized NTS session without reloading
+its stream. Live playback restores the actual channel; archive playback restores
+the episode, position and paused state from metadata attached when playback
+started. Older sessions without that metadata can be recovered for live NTS
+streams only.
+
+If the network is not ready at login, recovery retries up to ten times, with
+30 seconds between attempts. Unrelated music is left alone. Choosing playback
+or an output cancels automatic recovery. After suspend, the plugin checks the
+speaker again when its wake detector runs (normally within a minute).
+
+Closing the browser, reloading/disabling the plugin, or shutting down the
+computer detaches the controller and leaves a cast playing. Use **Stop** before
+disabling the plugin if you want the speaker to stop too. Local playback stops
+with the plugin.
 
 ## Command line and keybindings
 
@@ -176,6 +228,10 @@ recognises, so it will not take over someone else's music.
 omarchy-shell nts-radio toggle       # play or pause
 omarchy-shell nts-radio play
 omarchy-shell nts-radio pause
+omarchy-shell nts-radio playNext     # play the first queued episode
+omarchy-shell nts-radio clearQueue
+omarchy-shell nts-radio sleep 30     # 0 cancels, end stops at episode end
+omarchy-shell nts-radio retry
 omarchy-shell nts-radio next         # other channel
 omarchy-shell nts-radio channel 2
 omarchy-shell nts-radio volume 60
@@ -188,6 +244,7 @@ omarchy-shell nts-radio browser      # open or close the browser (toggle)
 omarchy-shell nts-radio open home    # open without closing again
 omarchy-shell nts-radio open search  # or straight onto search
 omarchy-shell nts-radio open saved   # or your library
+omarchy-shell nts-radio open listening # queue, history and timers
 
 omarchy-shell nts-radio output local          # play here
 omarchy-shell nts-radio output cast           # play on the remembered device
@@ -243,6 +300,7 @@ Under **Setup → Plugins → NTS Radio**, or as keys on the widget's entry in
 | `maxBarTextWidth` | `160` | Pixel cap on the bar title. `0` hides it. |
 | `volume` | `70` | Remembered cast-device volume. Local playback uses system output volume. |
 | `refreshMinutes` | `1` | Minutes between schedule refreshes while a panel or the browser is open, or audio is playing. Otherwise every 15 minutes. |
+| `followSavedShows` | `false` | Opt in to hourly checks of up to 20 saved shows for the Home shelf. |
 | `scrollSpeed` | `100` | How far a swipe or wheel notch scrolls in the browser, as a percentage. Raise it if scrolling feels heavy. |
 | `output` | `local` | Records what the last session was doing. Not restored as a starting output. |
 | `castDevice` | | UUID of the remembered cast device. |
@@ -258,7 +316,7 @@ deletes the plugin directory, and the uninstaller lives inside it.
 omarchy plugin remove sjfortin.nts-radio
 ```
 
-Disabling stops playback and leaves nothing running. Your library at
+Disabling stops local playback and detaches from a cast; use Stop first to end speaker playback. Your library at
 `~/.local/state/omarchy/nts-radio/library.json` is left alone, so reinstalling
 gets your saved shows back. Delete it yourself if you want it gone.
 
@@ -348,3 +406,29 @@ Please support NTS at [nts.live/supporters](https://www.nts.live/supporters).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Development and checks
+
+```bash
+node tests/search.test.cjs
+node tests/library.test.cjs
+python3 -m unittest discover -s tests -v
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=basic QT_QUICK_BACKEND=software \
+  /usr/lib/qt6/bin/qmltestrunner -input tests/qml -import tests/support
+omarchy plugin validate .
+```
+
+QML tests use process/socket fixtures and do not control your real player or
+speaker. `python3 scripts/benchmark_player.py` runs a separate, silent offline
+mpv benchmark using null audio and a temporary socket. See [RELEASE.md](RELEASE.md)
+for measured results, remaining device checks, and store verification steps.
+
+`status` includes a bounded `playbackTimings` trace for the latest request.
+Those UI diagnostics use wall-clock elapsed time, contain no media URLs, and
+are software state markers rather than an audible-latency measurement. The
+offline benchmark uses a monotonic clock.
+
+Plugin-owned UI labels have an English catalog in `i18n/en.json`, loaded through
+Omarchy's live Translations service. Additional catalogs can be added by language
+code; unavailable translations fall back to English. Network programme titles
+and tracklists retain their original language.

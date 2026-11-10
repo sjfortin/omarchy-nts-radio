@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 import "../NtsApi.js" as NtsApi
 
@@ -14,9 +15,10 @@ Item {
   id: root
 
   required property var episode
+  property bool showQueueAction: true
   property var service: null
   property bool active: true
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   property bool showSaveAction: true
   // Under the keyboard cursor. Kept distinct from hover so a pointer moving
   // across the window does not silently move the keyboard's place.
@@ -164,8 +166,17 @@ Item {
       // stays a list of titles rather than a wall of controls.
       BlockButton {
         anchors.verticalCenter: parent.verticalCenter
+        visible: root.showQueueAction && root.hasAudio && (hover.hovered || root.selected || root.activeFocus)
+        label: Strings.t("Queue")
+        ink: root.ink
+        horizontalPadding: Style.space(9)
+        onActivated: if (root.service && typeof root.service.enqueueEpisode === "function") root.service.enqueueEpisode(root.episode, false)
+      }
+
+      BlockButton {
+        anchors.verticalCenter: parent.verticalCenter
         visible: root.hasAudio && (hover.hovered || root.selected || root.activeFocus || root.isCurrent)
-        label: root.isPlaying ? "Pause" : "Play"
+        label: root.isPlaying ? Strings.t("Pause") : Strings.t("Play")
         filled: root.isPlaying
         ink: root.ink
         horizontalPadding: Style.space(9)
@@ -175,7 +186,7 @@ Item {
       BlockButton {
         anchors.verticalCenter: parent.verticalCenter
         visible: root.showSaveAction && (hover.hovered || root.selected || root.activeFocus || root.isSaved)
-        label: root.isSaved ? "Saved" : "Save"
+        label: root.isSaved ? Strings.t("Saved") : Strings.t("Save")
         filled: root.isSaved
         ink: root.ink
         horizontalPadding: Style.space(9)
@@ -185,7 +196,7 @@ Item {
       Caption {
         anchors.verticalCenter: parent.verticalCenter
         visible: !root.hasAudio
-        text: "No audio"
+        text: Strings.t("No audio")
         ink: root.ink
         dim: 0.35
       }

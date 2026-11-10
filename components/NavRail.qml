@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // The station mark lives at the plugin root next to the bar widget that
 // also uses it. A qualified directory import keeps one copy of it rather
@@ -17,17 +18,18 @@ Item {
 
   property string current: "home"
   property var service: null
-  property color ink: Color.foreground
-  property color paper: Color.background
+  property color ink: Commons.Color.foreground
+  property color paper: Commons.Color.background
 
   signal navigated(string page)
   signal liveRequested(int channel)
   signal helpRequested()
 
   readonly property var pages: [
-    { id: "home", label: "Home" },
-    { id: "search", label: "Search" },
-    { id: "saved", label: "Saved" }
+    { id: "home", label: Strings.t("Home") },
+    { id: "search", label: Strings.t("Search") },
+    { id: "saved", label: Strings.t("Saved") },
+    { id: Strings.t("listening"), label: Strings.t("Listening") }
   ]
 
   Rectangle {
@@ -140,7 +142,7 @@ Item {
       spacing: Style.space(6)
 
       Caption {
-        text: "On air"
+        text: Strings.t("On air")
         ink: root.ink
         dim: 0.4
         font.bold: true
@@ -260,7 +262,7 @@ Item {
       id: helpLabel
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
-      text: "? Keyboard"
+      text: Strings.t("? Keyboard")
       ink: root.ink
       dim: helpHover.hovered || helpHint.activeFocus ? 0.9 : 0.35
     }

@@ -20,7 +20,7 @@
 .import "Model.js" as Model
 .import "NtsApi.js" as NtsApi
 
-var VERSION = 1
+var VERSION = 2
 
 // Bounds so the file cannot grow without limit. Generous enough that nobody
 // reaches them by listening; small enough that the whole thing stays a cheap
@@ -28,6 +28,8 @@ var VERSION = 1
 var MAX_SHOWS = 300
 var MAX_EPISODES = 500
 var MAX_RESUME = 200
+var MAX_HISTORY = 200
+var MAX_QUEUE = 100
 
 // Below this many seconds in, "continue listening" is really "start again",
 // and past this fraction the episode is finished. Both ends are dropped from
@@ -36,7 +38,7 @@ var RESUME_MIN_SECONDS = 60
 var RESUME_DONE_FRACTION = 0.97
 
 function emptyLibrary() {
-  return { version: VERSION, shows: [], episodes: [], resume: [] }
+  return { version: VERSION, shows: [], episodes: [], resume: [], history: [], queue: [] }
 }
 
 // ------------------------------------------------------------------- loading
@@ -148,7 +150,9 @@ function load(raw) {
     version: VERSION,
     shows: mapValid(data.shows, savedShowFromEntry, MAX_SHOWS),
     episodes: mapValid(data.episodes, savedEpisodeFromEntry, MAX_EPISODES),
-    resume: mapValid(data.resume, resumeFromEntry, MAX_RESUME)
+    resume: mapValid(data.resume, resumeFromEntry, MAX_RESUME),
+    history: mapValid(data.history, savedEpisodeFromEntry, MAX_HISTORY),
+    queue: mapValid(data.queue, savedEpisodeFromEntry, MAX_QUEUE)
   }
 }
 
@@ -157,6 +161,8 @@ function serialize(library) {
   var source = library && typeof library === "object" ? library : emptyLibrary()
   return JSON.stringify({
     version: VERSION,
+    history: mapValid(source.history, savedEpisodeFromEntry, MAX_HISTORY),
+    queue: mapValid(source.queue, savedEpisodeFromEntry, MAX_QUEUE),
     shows: (source.shows || []).map(function(show) {
       return {
         alias: show.alias,
@@ -246,7 +252,9 @@ function cloneLibrary(library) {
     version: VERSION,
     shows: (source.shows || []).slice(),
     episodes: (source.episodes || []).slice(),
-    resume: (source.resume || []).slice()
+    resume: (source.resume || []).slice(),
+    history: (source.history || []).slice(),
+    queue: (source.queue || []).slice()
   }
 }
 
@@ -393,8 +401,73 @@ function resumeFraction(entry) {
   return Math.max(0, Math.min(1, entry.positionSec / entry.durationSec))
 }
 
+// History records successful playback, rather than unsuccessful selections.
+function notePlayed(library, episode, nowMs) {
+  var item = savedEpisodeFromEntry(episode)
+  if (!item) return library
+  var next = cloneLibrary(library)
+  var key = NtsApi.episodeKey(item)
+  next.history = next.history.filter(function(entry) { return NtsApi.episodeKey(entry) !== key })
+  item.savedAt = Number(nowMs) || 0
+  next.history.unshift(item)
+  next.history = next.history.slice(0, MAX_HISTORY)
+  return next
+}
+
+function enqueue(library, episode, atFront) {
+  var item = savedEpisodeFromEntry(episode)
+  if (!item || !item.audioUrl || (library.queue || []).length >= MAX_QUEUE) return library
+  var next = cloneLibrary(library)
+  if (atFront) next.queue.unshift(item)
+  else next.queue.push(item)
+  return next
+}
+
+function removeQueued(library, index) {
+  if (!Number.isInteger(index) || index < 0 || index >= (library.queue || []).length) return library
+  var next = cloneLibrary(library)
+  next.queue.splice(index, 1)
+  return next
+}
+
+function moveQueued(library, index, delta) {
+  var target = index + delta
+  if (!Number.isInteger(index) || !Number.isInteger(target) || index < 0 || target < 0
+      || index >= (library.queue || []).length || target >= library.queue.length) return library
+  var next = cloneLibrary(library)
+  var item = next.queue.splice(index, 1)[0]
+  next.queue.splice(target, 0, item)
+  return next
+}
+
+function clearHistory(library) {
+  var next = cloneLibrary(library)
+  next.history = []
+  return next
+}
+
+// Imports replace the library only after structural validation. Version 1
+// backups remain accepted; future versions are rejected rather than damaged.
+function importLibrary(raw) {
+  if (String(raw || "").length > 4000000) return null
+  var data
+  try { data = JSON.parse(raw) } catch (e) { return null }
+  if (!data || (data.version !== 1 && data.version !== VERSION)
+      || !Array.isArray(data.shows) || !Array.isArray(data.episodes) || !Array.isArray(data.resume)) return null
+  return load(raw)
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
+    notePlayed: notePlayed,
+    enqueue: enqueue,
+    removeQueued: removeQueued,
+    moveQueued: moveQueued,
+    clearHistory: clearHistory,
+    importLibrary: importLibrary,
+    MAX_HISTORY: MAX_HISTORY,
+    MAX_QUEUE: MAX_QUEUE,
+    savedEpisodeFromEntry: savedEpisodeFromEntry,
     VERSION: VERSION,
     MAX_SHOWS: MAX_SHOWS,
     MAX_EPISODES: MAX_EPISODES,
