@@ -1,3 +1,29 @@
+# NTS Radio 2.3.4 — bounded artwork loading
+
+Release: [v2.3.4](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.4).
+Addresses the [remote artwork finding](https://github.com/omacom/omarchy-plugin-marketplace/issues/14565#issuecomment-6759787939).
+
+Both browser and panel artwork use an isolated fetch/decode pipeline. Downloads
+have a 2 MB encoded limit, a 10-second absolute deadline and validated HTTPS
+redirects. Raster headers are checked before decoding; decoder memory, CPU,
+output size and dimensions are limited. The supervisor kills the whole worker
+process group and owns temporary-file cleanup. Qt receives only a validated,
+fixed 384×384 RGB PPM thumbnail, with no original metadata or remote URL.
+
+Admission is bounded to two active workers and 24 pending jobs, duplicate
+subscriptions to 16 owners, and the LRU cache to 24 entries / 14.4 million
+characters. Hidden or replaced frames cancel work and release decoded sources.
+Python 3 and ImageMagick are required for thumbnails; unavailable helpers leave
+the normal placeholder visible, without automatic installation.
+
+Validation: 12 JavaScript, 36 Python and 75 QML cases passed (123 total), including
+real chunked/oversized/slow HTTP responses, allowed and rejected redirects,
+PNG/JPEG/WebP normalization, CLI resource-limit inheritance, supervisor deadlines,
+output caps, cleanup, admission bursts, cache eviction and Qt thumbnail rendering.
+Physical speaker checks remain outstanding as documented in earlier releases.
+
+---
+
 # NTS Radio 2.3.3 — PyChromecast connection cleanup
 
 Release: [v2.3.3](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.3).

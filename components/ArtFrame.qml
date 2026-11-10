@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Commons as Commons
+import "../Model.js" as Model
 
 // Show artwork in a square, bordered frame.
 //
@@ -22,6 +23,55 @@ Rectangle {
   property bool hovered: false
   property bool playing: false
 
+  property int artworkOwner: 0
+  property string requestedArtwork: ""
+  property string localArtwork: ""
+  property bool artworkAdmitted: false
+  property bool artworkFailed: false
+  property bool syncingArtwork: false
+
+  function syncArtwork() {
+    if (!artworkOwner || syncingArtwork) return
+    syncingArtwork = true
+    var next = active && visible ? Model.safeArtwork(source) : ""
+    if (next !== requestedArtwork) {
+      var old = requestedArtwork
+      requestedArtwork = next
+      localArtwork = ""
+      artworkAdmitted = false
+      artworkFailed = false
+      if (old) ArtworkStore.release(old, artworkOwner)
+    }
+    if (next && !localArtwork && !artworkAdmitted && !artworkFailed) {
+      var result = ArtworkStore.acquire(next, artworkOwner)
+      artworkAdmitted = result.accepted
+      localArtwork = result.uri
+    }
+    syncingArtwork = false
+  }
+  onSourceChanged: syncArtwork()
+  onActiveChanged: syncArtwork()
+  onVisibleChanged: syncArtwork()
+  Component.onCompleted: { artworkOwner = ArtworkStore.newOwner(); syncArtwork() }
+  Component.onDestruction: if (requestedArtwork) ArtworkStore.release(requestedArtwork, artworkOwner)
+  Connections {
+    target: ArtworkStore
+    function onReady(url, uri) {
+      if (root.artworkAdmitted && root.active && root.visible && root.requestedArtwork === url) {
+        root.localArtwork = uri
+        root.artworkAdmitted = false
+      }
+    }
+    function onRejected(url) {
+      if (root.artworkAdmitted && root.requestedArtwork === url) {
+        root.artworkAdmitted = false
+        root.artworkFailed = true
+        root.localArtwork = ""
+      }
+    }
+    function onCapacityAvailable() { root.syncArtwork() }
+  }
+
   radius: 0
   color: Util.alpha(ink, 0.06)
   border.width: 1
@@ -30,17 +80,19 @@ Rectangle {
 
   Image {
     id: art
+    objectName: "normalizedArtwork"
     anchors.fill: parent
     anchors.margins: 1
-    source: root.active && root.source !== "" ? root.source : ""
+    source: root.active && root.localArtwork.indexOf("data:image/x-portable-pixmap;base64,") === 0
+      && root.localArtwork.length <= 600000 ? root.localArtwork : ""
     visible: status === Image.Ready
     fillMode: Image.PreserveAspectCrop
     asynchronous: true
-    cache: true
-    // Hold the previous cover while the next decodes, so moving between shows
-    // does not blink an empty frame.
-    retainWhileLoading: true
-    sourceSize.width: root.decodeWidth
+    cache: false
+    // Only a normalized fixed-size raster is decoded in the shared shell.
+    // Inactive artwork releases its source and previous decoded frame.
+    retainWhileLoading: false
+    sourceSize: Qt.size(Math.max(1, Math.min(384, root.decodeWidth)), Math.max(1, Math.min(384, root.decodeWidth)))
   }
 
   Caption {

@@ -472,3 +472,17 @@ Plugin-owned UI labels have an English catalog in `i18n/en.json`, loaded through
 Omarchy's live Translations service. Additional catalogs can be added by language
 code; unavailable translations fall back to English. Network programme titles
 and tracklists retain their original language.
+
+### Artwork loading
+
+Artwork requires Python 3 and ImageMagick (`magick` or `convert`). Missing
+helpers leave the NTS placeholder visible; no dependency is installed automatically.
+Two isolated workers fetch and normalize thumbnails, with at most 24 pending
+jobs and a 24-entry / 14.4-million-character memory cache. Every HTTPS redirect
+must pass the NTS host allowlist. Downloads stop at 2 MB and a 10-second total
+deadline, including continuously supplied responses. Only PNG, JPEG and static
+WebP are accepted, with dimensions at most 4096 and 4,194,304 pixels. Decoder
+processes have a 256 MiB address-space ceiling, three CPU seconds and bounded
+output. Qt receives only a fixed 384×384 RGB raster, never a remote image URL.
+Cancellation or timeout kills the worker process group and removes temporary
+files. Hidden artwork releases its source.

@@ -409,39 +409,14 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(12)
 
-        Rectangle {
+        Nts.ArtFrame {
           id: artFrame
           width: Style.space(92)
           height: width
-          radius: 0
-          color: Util.alpha(root.ink, 0.06)
-          border.width: 1
-          border.color: Util.alpha(root.ink, 0.35)
-
-          Image {
-            anchors.fill: parent
-            anchors.margins: 1
-            source: root.active ? root.subjectArtwork : ""
-            visible: status === Image.Ready
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            cache: true
-            // Hold the previous cover while the next one decodes, so a
-            // handover between shows does not blink an empty frame.
-            retainWhileLoading: true
-            sourceSize.width: 400
-          }
-
-          // Empty frame rather than a placeholder icon: a missing image is
-          // information too, and a glyph here would be the loudest thing in
-          // the panel.
-          Caption {
-            anchors.centerIn: parent
-            visible: root.subjectArtwork === ""
-            text: "NTS"
-            dim: 0.3
-            font.bold: true
-          }
+          source: root.subjectArtwork
+          active: root.active
+          ink: root.ink
+          decodeWidth: 384
         }
 
         Column {

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "sjfortin.nts-radio",
   "name": "NTS Radio",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "author": "Sam Fortin",
   "license": "MIT",
   "description": "An unofficial NTS Radio client: live channels, archive search, queue, sleep timer, local library and history, with Chromecast playback and session recovery.",

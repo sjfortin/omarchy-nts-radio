@@ -15,3 +15,4 @@ ShowCard 1.0 ShowCard.qml
 StateNote 1.0 StateNote.qml
 singleton Strings 1.0 Strings.qml
 TrackList 1.0 TrackList.qml
+singleton ArtworkStore 1.0 ArtworkStore.qml
