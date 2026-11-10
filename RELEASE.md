@@ -1,3 +1,12 @@
+# NTS Radio 2.3.7 — recover from curl and mpv launch failures
+
+The API pool releases its slot when curl fails to launch and uses its existing
+bounded retry. Playback clears its active process state and uses the existing
+reconnect backoff when mpv fails to launch. Started children retain their slot
+until exit. Regression tests cover failed launch, retry and exit accounting.
+
+---
+
 # NTS Radio 2.3.6 — recover from supervisor launch failures
 
 Release: [v2.3.6](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.6).

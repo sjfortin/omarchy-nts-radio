@@ -35,6 +35,22 @@ TestCase {
   }
   function finishProcess(process, code) { process.running = false; process.exited(code || 0, 0) }
 
+  function test_mpvFailedLaunchAllowsSuccessfulRetry() {
+    var local = createTemporaryObject(playerComponent, test, { streamUrl: Model.streamUrl(1) })
+    var process = findChild(local, "mpv")
+    process.failNextStart = true
+    local.play()
+    compare(local.processActive, false)
+    verify(local.lastError.indexOf("Could not start mpv") >= 0)
+    local.play()
+    compare(local.processActive, true)
+    compare(local.lastError, "")
+    local.stop()
+    compare(local.processActive, true)
+    finishProcess(process, 0)
+    compare(local.processActive, false)
+  }
+
   function test_latestCastSelectionWins() {
     service.outputMode = "cast"
     service.playEpisode(episode("a"), 0)

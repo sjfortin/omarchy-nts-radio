@@ -282,9 +282,9 @@ Item {
 
   function slotFinished(slot, text, ok, httpStatus) {
     var job = slot.job
+    if (!job) return
     slot.job = null
     inFlight = Math.max(0, inFlight - 1)
-    if (!job) return
     if (job.kind === "search" && job.epoch !== searchEpoch) {
       pump()
       return
