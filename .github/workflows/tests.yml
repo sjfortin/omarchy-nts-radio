@@ -1,4 +1,4 @@
-name: Search regression tests
+name: Plugin regression tests
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  search:
+  plugin:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -22,9 +22,13 @@ jobs:
         with:
           version: '6.8.3'
           cache: true
-      - name: Test search parsing and pagination
-        run: node tests/search.test.cjs
-      - name: Test QML search interactions
+      - name: Test search and library
+        run: |
+          node tests/search.test.cjs
+          node tests/library.test.cjs
+      - name: Test cast protocol and backup reader
+        run: python3 -m unittest discover -s tests -v
+      - name: Test QML playback and browser interactions
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QPA_PLATFORMTHEME: basic

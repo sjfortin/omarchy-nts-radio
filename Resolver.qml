@@ -27,8 +27,14 @@ Item {
   // episode — replaying it, or moving it between outputs — is served from here.
   property var cache: ({})
   property int cacheTtlMs: 45 * 60 * 1000
+  property int maxCacheEntries: 32
+  property int deadlineMs: 45000
+  property int generation: 0
+  property int runningGeneration: 0
+  property string queuedSource: ""
+  property bool processActive: false
 
-  readonly property bool busy: resolve.running
+  readonly property bool busy: processActive || queuedSource !== ""
   property string pendingSource: ""
 
   // url is "" when nothing castable could be found.
@@ -65,47 +71,75 @@ Item {
   }
 
   function start(source) {
+    abort()
     var target = NtsApi.safeAudioUrl(source)
+    var token = generation
     if (target === "") {
-      failed(String(source || ""), "This episode has no audio on NTS")
+      Qt.callLater(function() {
+        if (token === root.generation) root.failed(String(source || ""), "This episode has no audio on NTS")
+      })
       return false
     }
-
     var hit = cached(target)
     if (hit) {
-      // Never answer synchronously: callers set their own state around this.
-      Qt.callLater(function() { root.resolved(target, hit.url, hit.contentType) })
+      Qt.callLater(function() {
+        if (token === root.generation) root.resolved(target, hit.url, hit.contentType)
+      })
       return true
     }
-
-    if (resolve.running) return false
-
-    pendingSource = target
-    resolveOutput = ""
-    resolve.command = [
-      "yt-dlp",
-      "--no-warnings",
-      "--no-playlist",
-      // Bounded: a resolver that hangs would leave the UI on "Connecting"
-      // with nothing to time it out.
-      "--socket-timeout", "15",
-      "-f", formatSelector,
-      "--print", "%(ext)s\t%(url)s",
-      target
-    ]
-    resolve.running = true
+    queuedSource = target
+    // A killed Process may not have emitted exited yet. Its collector must
+    // finish before a replacement can reuse the same Process and buffer.
+    if (!processActive) launchQueued()
     return true
   }
 
+  function launchQueued() {
+    if (processActive || queuedSource === "") return
+    pendingSource = queuedSource
+    queuedSource = ""
+    runningGeneration = generation
+    resolveOutput = ""
+    processActive = true
+    resolve.command = ["yt-dlp", "--no-warnings", "--no-playlist",
+      "--socket-timeout", "15", "--retries", "1", "--extractor-retries", "1",
+      "-f", formatSelector, "--print", "%(ext)s\t%(url)s", pendingSource]
+    resolve.running = true
+    deadline.restart()
+  }
+
   function abort() {
-    if (resolve.running) resolve.running = false
-    pendingSource = ""
+    generation++
+    queuedSource = ""
+    deadline.stop()
+    if (processActive) resolve.running = false
+  }
+
+  function store(source, url, contentType) {
+    var next = ({})
+    var keys = Object.keys(cache).filter(function(key) {
+      return Date.now() - root.cache[key].atMs < root.cacheTtlMs && key !== source
+    }).sort(function(a, b) { return root.cache[b].atMs - root.cache[a].atMs })
+    for (var i = 0; i < Math.min(keys.length, maxCacheEntries - 1); i++) next[keys[i]] = cache[keys[i]]
+    next[source] = { url: url, contentType: contentType, atMs: Date.now() }
+    cache = next
+  }
+
+  Timer {
+    id: deadline
+    interval: root.deadlineMs
+    onTriggered: {
+      var source = root.pendingSource
+      root.abort()
+      root.failed(source, "Episode lookup timed out — try again")
+    }
   }
 
   property string resolveOutput: ""
 
   Process {
     id: resolve
+    objectName: "resolve"
     running: false
 
     stdout: StdioCollector {
@@ -116,8 +150,14 @@ Item {
     stderr: StdioCollector { waitForEnd: true }
 
     onExited: function(exitCode, exitStatus) {
+      deadline.stop()
+      root.processActive = false
       var source = root.pendingSource
       root.pendingSource = ""
+      if (root.runningGeneration !== root.generation) {
+        Qt.callLater(root.launchQueued)
+        return
+      }
       if (source === "") return
 
       if (exitCode !== 0) {
@@ -141,7 +181,7 @@ Item {
         return
       }
 
-      root.cache[source] = { url: url, contentType: contentType, atMs: Date.now() }
+      root.store(source, url, contentType)
       root.resolved(source, url, contentType)
     }
   }

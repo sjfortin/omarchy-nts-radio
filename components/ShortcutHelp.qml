@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // What the keyboard does, for the one moment somebody wonders.
 //
@@ -13,8 +14,8 @@ import qs.Commons
 Item {
   id: root
 
-  property color ink: Color.foreground
-  property color paper: Color.background
+  property color ink: Commons.Color.foreground
+  property color paper: Commons.Color.background
 
   signal dismissed()
 
@@ -23,17 +24,18 @@ Item {
   // happens to the audio.
   readonly property var groups: [
     {
-      title: "Going places",
+      title: Strings.t("Going places"),
       rows: [
         ["H", "Home"],
         ["/", "Search"],
-        ["S", "Saved"],
+        ["S", Strings.t("Saved")],
+        ["Q", Strings.t("Listening")],
         ["Esc", "Back, then close"],
         ["Ctrl W", "Close the window"]
       ]
     },
     {
-      title: "Moving around",
+      title: Strings.t("Moving around"),
       rows: [
         ["J  K   ↓  ↑", "Move down / up"],
         ["PgDn  PgUp", "Five at a time"],
@@ -42,7 +44,7 @@ Item {
       ]
     },
     {
-      title: "Listening",
+      title: Strings.t("Listening"),
       rows: [
         ["Space", "Play / pause or focused control"],
         ["P", "Play what is selected"],
@@ -93,7 +95,7 @@ Item {
           id: heading
           anchors.left: parent.left
           textFormat: Text.PlainText
-          text: "Keyboard"
+          text: Strings.t("Keyboard")
           color: root.ink
           font.family: Style.font.family
           font.pixelSize: Style.font.subtitle
@@ -106,7 +108,7 @@ Item {
           anchors.verticalCenter: heading.verticalCenter
           ink: root.ink
           dim: 0.4
-          text: "? or Esc to close"
+          text: Strings.t("? or Esc to close")
         }
       }
 

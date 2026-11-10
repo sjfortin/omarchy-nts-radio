@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // A show or an episode as a grid card: artwork above, title and one line of
 // metadata below. Used for the editorial rails on the home page and for the
@@ -14,7 +15,7 @@ Item {
   property bool isShow: false
   property var service: null
   property bool active: true
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   property string subtitle: ""
   property bool selected: false
 

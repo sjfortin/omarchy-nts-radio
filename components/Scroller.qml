@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // A Flickable that scrolls the way the rest of the desktop does.
 //

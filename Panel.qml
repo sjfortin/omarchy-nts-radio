@@ -1,5 +1,7 @@
 import QtQuick
+import "components" as Nts
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 import "Model.js" as Model
@@ -26,8 +28,8 @@ Item {
 
   signal requestClose()
 
-  readonly property color ink: bar ? bar.foreground : Color.popups.text
-  readonly property color paper: Color.popups.background
+  readonly property color ink: bar ? bar.foreground : Commons.Color.popups.text
+  readonly property color paper: Commons.Color.popups.background
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   // Since Phase 2 the panel has two possible subjects: the live broadcast, or
@@ -237,7 +239,7 @@ Item {
       id: rowDetail
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      text: outputRow.connecting ? "Connecting" : outputRow.detail
+      text: outputRow.connecting ? Nts.Strings.t("Connecting") : outputRow.detail
       dim: 0.42
     }
 
@@ -289,7 +291,7 @@ Item {
 
         Caption {
           anchors.verticalCenter: parent.verticalCenter
-          text: "Radio"
+          text: Nts.Strings.t("Radio")
           dim: 0.7
           font.bold: true
         }
@@ -449,7 +451,7 @@ Item {
 
           Caption {
             width: parent.width
-            text: root.archive ? "Archive" : (root.hasShow || (root.service && root.service.live) ? "Now" : "Loading")
+            text: root.archive ? Nts.Strings.t("Archive") : (root.hasShow || (root.service && root.service.live) ? Nts.Strings.t("Now") : Nts.Strings.t("Loading"))
             dim: 0.45
           }
 
@@ -559,7 +561,7 @@ Item {
         // "Retrying" rather than a "Connecting" that never resolves: the
         // player backs off and keeps trying, and this button is also how the
         // user calls it off.
-        label: root.playing ? (root.casting && !root.archive ? "Stop" : "Pause")
+        label: root.playing ? (root.casting && !root.archive ? Nts.Strings.t("Stop") : Nts.Strings.t("Pause"))
           : (root.loading ? (root.service && root.service.playbackError !== "" ? "Retrying" : "Connecting")
           : "Play")
         filled: root.playing
@@ -576,7 +578,7 @@ Item {
           id: volumeLabel
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: root.service && root.service.castingAudio ? "Cast" : "System"
+          text: root.service && root.service.castingAudio ? Nts.Strings.t("Cast") : Nts.Strings.t("System")
           dim: 0.5
         }
 
@@ -609,7 +611,7 @@ Item {
           ? (parent.width - Style.space(8) * 2) / 3
           : (parent.width - Style.space(8)) / 2
         height: root.controlHeight
-        label: "Browse"
+        label: Nts.Strings.t("Browse")
         enabledAction: root.service !== null
         onActivated: {
           if (root.service) root.service.openBrowser()
@@ -621,7 +623,7 @@ Item {
         visible: root.archive
         width: (parent.width - Style.space(8) * 2) / 3
         height: root.controlHeight
-        label: "Live"
+        label: Nts.Strings.t("Live")
         enabledAction: root.service !== null
         onActivated: if (root.service) root.service.playLive()
       }
@@ -631,7 +633,7 @@ Item {
           ? (parent.width - Style.space(8) * 2) / 3
           : (parent.width - Style.space(8)) / 2
         height: root.controlHeight
-        label: "Open"
+        label: Nts.Strings.t("Open")
         enabledAction: root.hasShow
         onActivated: if (root.service) root.service.openCurrent()
       }
@@ -658,14 +660,14 @@ Item {
         Caption {
           id: outputHeader
           anchors.left: parent.left
-          text: "Output"
+          text: Nts.Strings.t("Output")
           dim: 0.45
           font.bold: true
         }
 
         Caption {
           anchors.right: parent.right
-          text: root.service && root.service.castDiscovering ? "Looking…" : ""
+          text: root.service && root.service.castDiscovering ? Nts.Strings.t("Looking…") : ""
           dim: 0.4
         }
       }
@@ -680,7 +682,7 @@ Item {
         // output except when an episode could not be cast and fell back here.
         OutputRow {
           width: parent.width
-          label: "This computer"
+          label: Nts.Strings.t("This computer")
           detail: root.service && !root.service.mpvAvailable ? "mpv not installed" : ""
           selected: root.service ? !root.service.castingAudio : true
           enabledAction: root.service !== null && root.service.mpvAvailable
@@ -742,7 +744,7 @@ Item {
       visible: root.service && root.service.upNext.length > 0
 
       Caption {
-        text: "Up next"
+        text: Nts.Strings.t("Up next")
         dim: 0.45
         font.bold: true
       }
@@ -789,7 +791,7 @@ Item {
       visible: root.problem !== ""
       text: root.problem
       dim: 0.55
-      color: Util.alpha(Color.urgent, 0.85)
+      color: Util.alpha(Commons.Color.urgent, 0.85)
     }
   }
 }

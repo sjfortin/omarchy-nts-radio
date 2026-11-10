@@ -62,6 +62,12 @@ var ENTITIES = {
   lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”"
 }
 
+// The host owns its shared tooltip Text format. Neutralize markup there,
+// including entities, without changing the PlainText titles in our own UI.
+function tooltipText(value) {
+  return String(value || "").replace(/&/g, "＆").replace(/</g, "‹").replace(/>/g, "›")
+}
+
 function decodeEntities(value) {
   return String(value).replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, function(match, body) {
     if (body.charAt(0) === "#") {
@@ -337,6 +343,7 @@ function ipcCommand(args, requestId) {
 }
 
 function parseIpcLine(line) {
+  if (String(line || "").length > 65536) return null
   try {
     var parsed = JSON.parse(String(line || ""))
     return parsed && typeof parsed === "object" ? parsed : null
@@ -356,6 +363,7 @@ if (typeof module !== "undefined") {
     streamUrl: streamUrl,
     channelFromSetting: channelFromSetting,
     channelSettingValue: channelSettingValue,
+    tooltipText: tooltipText,
     decodeEntities: decodeEntities,
     plainText: plainText,
     safeArtwork: safeArtwork,

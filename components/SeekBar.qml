@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // The archive progress bar: a rule that fills, and that you can drag.
 //
@@ -12,8 +13,8 @@ Item {
   property real position: 0
   property real duration: 0
   property bool enabledAction: true
-  property color ink: Color.foreground
-  property string accessibleName: "Position"
+  property color ink: Commons.Color.foreground
+  property string accessibleName: Strings.t("Position")
 
   signal seeked(real seconds)
 
@@ -24,10 +25,11 @@ Item {
   Keys.onPressed: function(event) {
     if (!root.enabledAction) return
     var step = root.duration <= 100 ? 5 : 30
-    if (event.key === Qt.Key_Left || event.key === Qt.Key_Down) {
+    var key = Util.readingKey(event)
+    if (key === Qt.Key_Left || key === Qt.Key_Down) {
       root.seeked(Math.max(0, root.position - step))
       event.accepted = true
-    } else if (event.key === Qt.Key_Right || event.key === Qt.Key_Up) {
+    } else if (key === Qt.Key_Right || key === Qt.Key_Up) {
       root.seeked(Math.min(root.duration, root.position + step))
       event.accepted = true
     }

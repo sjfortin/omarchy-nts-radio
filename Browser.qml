@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 
 import "components" as Nts
 import "pages" as Pages
@@ -56,7 +57,7 @@ Item {
         if (parsed && typeof parsed.page === "string") requested = parsed.page
       } catch (e) { /* an unparseable payload just opens the browser */ }
     }
-    if (requested === "search" || requested === "saved" || requested === "home") navigate(requested)
+    if (requested === "search" || requested === "saved" || requested === "home" || requested === "listening") navigate(requested)
     Qt.callLater(function() {
       keyScope.forceActiveFocus()
       if (root.page === "search" && searchLoader.item) searchLoader.item.focusInput()
@@ -84,8 +85,8 @@ Item {
     ? String(manifest.id) : "sjfortin.nts-radio"
 
   // ---- theme
-  readonly property color ink: Color.foreground
-  readonly property color paper: Color.background
+  readonly property color ink: Commons.Color.foreground
+  readonly property color paper: Commons.Color.background
 
   // ---- routing
 
@@ -183,6 +184,7 @@ Item {
     if (page === "home") return homeLoader.item
     if (page === "search") return searchLoader.item
     if (page === "saved") return savedLoader.item
+    if (page === "listening") return listeningLoader.item
     return detailLoader.item
   }
 
@@ -213,6 +215,8 @@ Item {
 
     FocusScope {
       id: keyScope
+      LayoutMirroring.enabled: Commons.I18n.rightToLeft
+      LayoutMirroring.childrenInherit: true
       anchors.fill: parent
       focus: true
 
@@ -281,7 +285,7 @@ Item {
           return
         }
 
-        switch (event.key) {
+        switch (Util.readingKey(event)) {
           // vi movement alongside the arrows, the way the rest of the shell's
           // panels behave.
           case Qt.Key_J:
@@ -326,6 +330,10 @@ Item {
             break
           case Qt.Key_H:
             root.navigate("home")
+            event.accepted = true
+            break
+          case Qt.Key_Q:
+            root.navigate("listening")
             event.accepted = true
             break
           case Qt.Key_S:
@@ -388,7 +396,7 @@ Item {
             anchors.left: parent.left
             anchors.leftMargin: Style.space(20)
             anchors.verticalCenter: parent.verticalCenter
-            label: "Back"
+            label: Nts.Strings.t("Back")
             ink: root.ink
             onActivated: root.back()
           }
@@ -459,6 +467,21 @@ Item {
             }
           }
 
+          Loader {
+            id: listeningLoader
+            anchors.fill: parent
+            active: root.page === "listening" || visited
+            visible: root.page === "listening"
+            asynchronous: true
+            property bool visited: false
+            sourceComponent: Pages.ListeningPage {
+              service: root.service
+              active: root.opened && root.page === "listening"
+              ink: root.ink
+              onEpisodeRequested: function(episode) { root.openEpisode(episode) }
+            }
+          }
+
           // Detail pages share one Loader: only ever one is on screen, and
           // leaving one should genuinely release it rather than pile up a
           // window full of half-scrolled shows.
@@ -505,7 +528,7 @@ Item {
           anchors.right: parent.right
           anchors.margins: Style.space(8)
           horizontalAlignment: Text.AlignHCenter
-          ink: Color.urgent
+          ink: Commons.Color.urgent
           dim: 0.85
           visible: text !== ""
           text: {
@@ -528,6 +551,7 @@ Item {
         service: root.service
         ink: root.ink
         paper: root.paper
+        onListeningRequested: root.navigate("listening")
         onShowRequested: function(showAlias, episodeAlias) {
           if (root.service && root.service.archiveEpisode)
             root.openEpisode(root.service.archiveEpisode)
@@ -565,6 +589,7 @@ Item {
     if (page === "home") homeLoader.visited = true
     else if (page === "search") searchLoader.visited = true
     else if (page === "saved") savedLoader.visited = true
+    else if (page === "listening") listeningLoader.visited = true
   }
 
   Component.onCompleted: homeLoader.visited = true

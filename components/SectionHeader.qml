@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // A section's name on the left, an optional aside on the right, a rule under
 // both. The browser's only structural device.
@@ -8,7 +9,7 @@ Item {
 
   property string title: ""
   property string aside: ""
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
 
   implicitHeight: label.implicitHeight + Style.space(10)
 

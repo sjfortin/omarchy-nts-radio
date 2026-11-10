@@ -1,0 +1,16 @@
+ArtFrame 1.0 ArtFrame.qml
+BlockButton 1.0 BlockButton.qml
+Caption 1.0 Caption.qml
+EpisodeRow 1.0 EpisodeRow.qml
+NavRail 1.0 NavRail.qml
+PlaybackBar 1.0 PlaybackBar.qml
+Rule 1.0 Rule.qml
+Scroller 1.0 Scroller.qml
+SearchField 1.0 SearchField.qml
+SectionHeader 1.0 SectionHeader.qml
+SeekBar 1.0 SeekBar.qml
+ShortcutHelp 1.0 ShortcutHelp.qml
+ShowCard 1.0 ShowCard.qml
+StateNote 1.0 StateNote.qml
+singleton Strings 1.0 Strings.qml
+TrackList 1.0 TrackList.qml

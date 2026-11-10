@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // The search input. A rule under a line of type — no rounded box, no magnifier
 // glyph, no placeholder chrome. The caret is the affordance.
@@ -8,7 +9,7 @@ Item {
 
   property string text: ""
   property string placeholder: "Search artists, tracks, shows or genres"
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   readonly property bool hasFocus: input.activeFocus
 
   onTextChanged: if (input.text !== text) input.text = text
@@ -99,7 +100,7 @@ Item {
     anchors.right: parent.right
     anchors.verticalCenter: input.verticalCenter
     visible: input.text !== ""
-    text: "Clear"
+    text: Strings.t("Clear")
     ink: root.ink
     dim: clearHover.hovered || activeFocus ? 0.9 : 0.45
 

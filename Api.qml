@@ -257,7 +257,7 @@ Item {
     return null
   }
 
-  function slotFinished(slot, text, ok) {
+  function slotFinished(slot, text, ok, httpStatus) {
     var job = slot.job
     slot.job = null
     inFlight = Math.max(0, inFlight - 1)
@@ -278,7 +278,7 @@ Item {
     // dropped mid-request is worth asking again, a 404 is not, and curl -f
     // has already collapsed both into the same exit code so the retry is
     // bounded rather than clever. Anything past that is reported.
-    if (job.tries < 1) {
+    if (job.tries < 1 && (!httpStatus || httpStatus === 408 || httpStatus === 429 || httpStatus >= 500)) {
       job.tries++
       retryQueue.push(job)
       retryTimer.restart()
@@ -326,7 +326,7 @@ Item {
       // between being handed work and the Process actually starting.
       property var job: null
       timeoutSeconds: root.timeoutSeconds
-      onFinished: function(text, ok) { root.slotFinished(slot, text, ok) }
+      onFinished: function(text, ok, httpStatus) { root.slotFinished(slot, text, ok, httpStatus) }
     }
   }
 

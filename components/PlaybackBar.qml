@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 import "../Model.js" as Model
 import "../NtsApi.js" as NtsApi
@@ -16,9 +17,10 @@ Item {
   id: root
 
   property var service: null
-  property color ink: Color.foreground
-  property color paper: Color.background
+  property color ink: Commons.Color.foreground
+  property color paper: Commons.Color.background
 
+  signal listeningRequested()
   signal showRequested(string showAlias, string episodeAlias)
 
   readonly property bool archive: service ? service.archiveMode : false
@@ -46,7 +48,7 @@ Item {
     return Model.channelLabel(service.channel) + " · Live"
   }
 
-  implicitHeight: Style.space(72)
+  implicitHeight: Style.space(110)
 
   Rule {
     anchors.top: parent.top
@@ -60,7 +62,7 @@ Item {
     id: layout
     anchors.fill: parent
     anchors.topMargin: Style.space(12)
-    anchors.bottomMargin: Style.space(12)
+    anchors.bottomMargin: Style.space(44)
     anchors.leftMargin: Style.space(16)
     anchors.rightMargin: Style.space(16)
     spacing: Style.space(14)
@@ -93,7 +95,7 @@ Item {
       width: Style.space(78)
       label: root.playing
         ? (root.archive ? "Pause" : (root.service && root.service.castingAudio ? "Stop" : "Pause"))
-        : (root.loading ? "…" : "Play")
+        : (root.loading ? "Cancel" : "Play")
       filled: root.playing
       ink: root.ink
       paper: root.paper
@@ -159,7 +161,7 @@ Item {
 
           SeekBar {
             id: seek
-            accessibleName: "Episode position"
+            accessibleName: Strings.t("Episode position")
             anchors.left: parent.left
             anchors.right: elapsed.left
             anchors.rightMargin: Style.space(10)
@@ -199,7 +201,7 @@ Item {
         id: volumeLabel
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        text: root.service && root.service.castingAudio ? "Cast" : "System"
+        text: root.service && root.service.castingAudio ? Strings.t("Cast") : Strings.t("System")
         ink: root.ink
         dim: 0.45
       }
@@ -222,4 +224,42 @@ Item {
       }
     }
   }
+  Row {
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    anchors.margins: Style.space(8)
+    spacing: Style.space(8)
+    BlockButton {
+      label: root.service ? Strings.t("Listening (%1)").arg(Commons.I18n.formatNumber(root.service.queue.length)) : Strings.t("Listening")
+      ink: root.ink
+      onActivated: root.listeningRequested()
+    }
+    BlockButton {
+      label: Strings.t("Next")
+      ink: root.ink
+      enabledAction: root.service && root.service.queue.length > 0
+      onActivated: root.service.playNextQueued()
+    }
+    BlockButton {
+      visible: root.service && !root.loading && !root.playing && (root.service.archiveError !== "" || root.service.playbackError !== "")
+      label: Strings.t("Retry")
+      ink: root.ink
+      onActivated: {
+        if (root.archive && root.episode) root.service.playEpisode(root.episode, root.service.positionSec)
+        else root.service.play()
+      }
+    }
+    Caption {
+      width: Math.max(0, root.width - Style.space(350))
+      anchors.verticalCenter: parent.verticalCenter
+      ink: root.ink
+      elide: Text.ElideRight
+      text: !root.service ? "" : root.loading ? Strings.t(root.service.loadingStage)
+        : root.service.recoveringCast ? Strings.t("Checking speaker session…")
+        : root.service.sleepAtEpisodeEnd ? Strings.t("Sleep at episode end")
+        : root.service.sleepRemainingMinutes > 0 ? Strings.t("Sleep in %1 min").arg(Commons.I18n.formatNumber(root.service.sleepRemainingMinutes)) : ""
+    }
+  }
+
 }

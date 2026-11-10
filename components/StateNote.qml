@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // The quiet inline state a page shows instead of its content: loading, empty,
 // or failed. Never a dialog, never a modal — a line of text where the content
@@ -9,7 +10,7 @@ Item {
 
   property string text: ""
   property bool isError: false
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   // Optional recovery action, shown as a block button under the line.
   property string actionLabel: ""
   signal actionTriggered()
@@ -25,7 +26,7 @@ Item {
     Caption {
       anchors.horizontalCenter: parent.horizontalCenter
       text: root.text
-      ink: root.isError ? Color.urgent : root.ink
+      ink: root.isError ? Commons.Color.urgent : root.ink
       dim: root.isError ? 0.9 : 0.5
     }
 

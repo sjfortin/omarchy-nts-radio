@@ -1,10 +1,11 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // A hairline. The browser separates things with rules rather than cards or
 // shadows: it is a magazine layout, not a dashboard.
 Rectangle {
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   property real dim: 0.18
 
   width: parent ? parent.width : 0

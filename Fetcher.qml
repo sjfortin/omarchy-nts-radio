@@ -23,18 +23,20 @@ Item {
 
   // ok is false for any transport failure or non-2xx status. `text` is the
   // body on success and "" otherwise — callers never see a half-response.
-  signal finished(string text, bool ok)
+  signal finished(string text, bool ok, int httpStatus)
 
   // Filled by onStreamFinished, which fires before onExited because the
   // collector waits for end-of-stream. StdioCollector has no reset(), so the
   // body is captured per-run here rather than read off the collector later.
   property string body: ""
+  property int httpStatus: 0
 
   function start(target) {
     if (request.running) return false
     url = String(target || "")
     if (url === "") return false
     body = ""
+    httpStatus = 0
     request.command = [
       "curl", "-fsS", "--compressed",
       "--max-time", String(Math.max(3, Math.min(60, timeoutSeconds))),
@@ -52,6 +54,7 @@ Item {
       // so a response that is wrong by orders of magnitude should be dropped
       // rather than held.
       "--max-filesize", "4000000",
+      "--write-out", "%{stderr}%{http_code}",
       "-H", "Accept: application/json",
       "-A", "omarchy-nts-radio",
       url
@@ -74,12 +77,15 @@ Item {
     }
 
     // curl's diagnostics are noise; the exit code carries the outcome.
-    stderr: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.httpStatus = Number(String(text || "").slice(-3)) || 0
+    }
 
     onExited: function(exitCode, exitStatus) {
       var payload = exitCode === 0 ? root.body : ""
       root.body = ""
-      root.finished(payload, exitCode === 0 && payload !== "")
+      root.finished(payload, exitCode === 0 && payload !== "", root.httpStatus)
     }
   }
 }

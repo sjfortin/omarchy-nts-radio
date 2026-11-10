@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 import "../components" as Nts
 import "../NtsApi.js" as NtsApi
@@ -12,7 +13,7 @@ Item {
 
   property var service: null
   property bool active: true
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
 
   signal showRequested(string alias)
   signal episodeRequested(var episode)
@@ -450,7 +451,7 @@ Item {
         model: ["all", "episodes", "tracks", "shows", "tags"]
         Nts.BlockButton {
           required property string modelData
-          label: (modelData === "tracks" ? "Artist / track" : modelData)
+          label: (modelData === "tracks" ? Nts.Strings.t("Artist / track") : modelData)
             + (root.groups[modelData] ? " · " + root.groups[modelData].total : "")
           ink: root.ink
           filled: root.filter === modelData
@@ -467,7 +468,7 @@ Item {
         model: root.suggestions
         Nts.BlockButton {
           required property string modelData
-          label: "Try " + modelData
+          label: Nts.Strings.t("Try ") + modelData
           ink: root.ink
           onActivated: root.searchFor(modelData)
         }
@@ -480,10 +481,10 @@ Item {
       dim: 0.42
       text: {
         if (root.trackMessage !== "") return root.trackMessage
-        if (root.searching) return "Searching…"
+        if (root.searching) return Nts.Strings.t("Searching…")
         if (root.query === "") return ""
-        if (root.total > 0) return root.total + " matches across episodes, tracks, shows and tags"
-        if (root.query !== "") return "Try an artist, track title, show or genre"
+        if (root.total > 0) return root.total + Nts.Strings.t(" matches across episodes, tracks, shows and tags")
+        if (root.query !== "") return Nts.Strings.t("Try an artist, track title, show or genre")
 
         return ""
       }
@@ -516,12 +517,12 @@ Item {
         width: parent.width
         ink: root.ink
         text: {
-          if (root.failed) return "Could not reach NTS"
-          if (root.showEmpty) return "Nothing for “" + root.query + "”"
+          if (root.failed) return Nts.Strings.t("Could not reach NTS")
+          if (root.showEmpty) return Nts.Strings.t("Nothing for “") + root.query + "”"
           return ""
         }
         isError: root.failed
-        actionLabel: root.failed ? "Try again" : ""
+        actionLabel: root.failed ? Nts.Strings.t("Try again") : ""
         onActionTriggered: root.run()
       }
 
@@ -534,7 +535,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Popular searches"
+          title: Nts.Strings.t("Popular searches")
           ink: root.ink
         }
 
@@ -569,7 +570,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Shows"
+          title: Nts.Strings.t("Shows")
           ink: root.ink
           aside: root.groupLabel("shows")
         }
@@ -630,7 +631,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Episodes"
+          title: Nts.Strings.t("Episodes")
           ink: root.ink
           aside: root.groupLabel("episodes")
         }
@@ -688,7 +689,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Tracks"
+          title: Nts.Strings.t("Tracks")
           ink: root.ink
           aside: root.groupLabel("tracks")
         }
@@ -778,7 +779,7 @@ Item {
               }
               Nts.BlockButton {
                 readonly property bool saving: !!root.savingTracks[NtsApi.episodeKey(root.episodeFromTrack(trackRow.modelData))]
-                label: saving ? "Saving…" : root.service && root.service.isEpisodeSaved(root.episodeFromTrack(trackRow.modelData))
+                label: saving ? Nts.Strings.t("Saving…") : root.service && root.service.isEpisodeSaved(root.episodeFromTrack(trackRow.modelData))
                   ? "Saved" : "Save"
                 enabledAction: !saving
                 ink: root.ink
@@ -844,7 +845,7 @@ Item {
 
         Nts.SectionHeader {
           width: parent.width
-          title: "Tags"
+          title: Nts.Strings.t("Tags")
           aside: root.groupLabel("tags")
           ink: root.ink
         }

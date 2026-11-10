@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // A hard-edged rectangle with a word in it. Square corners, one-pixel border,
 // filled when it is the active choice. No icons where a word will do.
@@ -9,8 +10,8 @@ Rectangle {
   property string label: ""
   property bool filled: false
   property bool enabledAction: true
-  property color ink: Color.foreground
-  property color paper: Color.background
+  property color ink: Commons.Color.foreground
+  property color paper: Commons.Color.background
   property real horizontalPadding: Style.space(12)
 
   signal activated()

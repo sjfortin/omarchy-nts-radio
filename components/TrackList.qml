@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // What was played.
 //
@@ -17,7 +18,7 @@ Column {
   id: root
 
   property var tracks: []
-  property color ink: Color.foreground
+  property color ink: Commons.Color.foreground
   property int selectedIndex: -1
 
   spacing: 0
