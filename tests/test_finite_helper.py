@@ -46,7 +46,7 @@ class FiniteHelperTests(unittest.TestCase):
             for _ in range(100):
                 try:
                     state = Path(f'/proc/{pid}/stat').read_text().split()[2]
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     break
                 if state == 'Z':
                     break
