@@ -1,12 +1,12 @@
-# Store verification request — v2.3.4
+# Store verification request — v2.3.5
 
 Use the marketplace's [Plugin verification issue form](https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=verify-plugin.yml)
-for the exact source commit identified by the `v2.3.4` release tag.
+for the exact source commit identified by the `v2.3.5` release tag.
 
 **Request:** Verify and publish a newer upstream commit  
 **Plugin ID:** `sjfortin.nts-radio`  
 **Repository:** `https://github.com/sjfortin/omarchy-nts-radio`  
-**Commit:** Resolve `v2.3.4` to its full 40-character commit SHA and confirm it
+**Commit:** Resolve `v2.3.5` to its full 40-character commit SHA and confirm it
 is the published repository HEAD before submitting.
 
 The 2.3.1 patch fixes the explicit-paste transfer issue raised in marketplace
@@ -26,9 +26,13 @@ The 2.3.4 patch isolates remote artwork fetch/decode with byte, dimension,
 process resource and absolute time limits. Qt receives only normalized 384px
 rasters; active workers, pending work and thumbnail cache are bounded.
 
+The 2.3.5 patch bounds finite resolver/import operations with a supervisor:
+absolute deadlines, producer output caps, forced process-group cleanup and
+reaping. Backup import rejects nonregular files and recovers busy state on exit.
+
 ## Release summary
 
-NTS Radio 2.3.4 adds a persistent archive queue, local listening history, sleep
+NTS Radio 2.3.5 adds a persistent archive queue, local listening history, sleep
 timers, optional saved-show discovery, and validated library backup transfer.
 It improves archive switching and playback cancellation, and recovers recognized
 live/archive cast sessions after controller restart without reloading the stream.
@@ -45,7 +49,7 @@ live/archive cast sessions after controller restart without reloading the stream
 - A cast continues when its controller exits. Explicit Stop ends speaker playback.
 - Python cast tests use mocks; physical device checks are tracked in RELEASE.md.
 
-Validation: 12 JavaScript tests, 36 Python tests and 75 QML test cases passed;
+Validation: 12 JavaScript tests, 42 Python tests and 76 QML test cases passed;
 GitHub Actions, manifest validation, and compilation against the installed
 Omarchy runtime passed. Physical speaker/shutdown recovery checks have not been
 performed and must not be represented as completed.

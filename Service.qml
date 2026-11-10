@@ -1144,6 +1144,7 @@ Item {
   property var importPreview: null
   property string importBody: ""
   property bool transferBusy: false
+  property int importDeadlineMs: 6000
 
   function chosenJsonPath(url) {
     var value = String(url || "")
@@ -1170,7 +1171,8 @@ Item {
     importPreview = null
     importBody = ""
     libraryTransferMessage = "Reading backup…"
-    importReader.command = ["python3", pluginDir + "/scripts/library_io.py", path]
+    importReader.command = ["python3", pluginDir + "/scripts/finite_helper.py", "import", path]
+    importDeadline.restart()
     importReader.running = true
     return true
   }
@@ -1212,6 +1214,12 @@ Item {
     onSaveFailed: { root.transferBusy = false; root.libraryTransferMessage = "Could not back up current library; import cancelled" }
   }
 
+  Timer {
+    id: importDeadline
+    interval: root.importDeadlineMs
+    onTriggered: importReader.running = false
+  }
+
   Process {
     id: importReader
     objectName: "importReader"
@@ -1221,6 +1229,7 @@ Item {
     }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(code, status) {
+      importDeadline.stop()
       root.transferBusy = false
       root.importPreview = code === 0 ? Library.importLibrary(root.importBody) : null
       root.importBody = ""
@@ -1733,6 +1742,8 @@ Item {
   }
 
   Component.onDestruction: {
+    importDeadline.stop()
+    importReader.running = false
     // Last chance to remember where an archive got to: the plugin is being
     // disabled or the shell is going down, and mpv is about to be killed.
     saveProgress()

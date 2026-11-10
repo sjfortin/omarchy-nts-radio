@@ -1,3 +1,29 @@
+# NTS Radio 2.3.5 — finite helper process control
+
+Release: [v2.3.5](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.5).
+Addresses the [remaining process-control prerequisites](https://github.com/omacom/omarchy-plugin-marketplace/issues/14565#issuecomment-6760345077).
+
+Episode resolution and backup import now run through a finite-operation
+supervisor. It captures at most 64 KiB / 4 MB respectively, discards producer
+stderr, and enforces absolute 45-second / 5-second deadlines, including process
+exit after stdout EOF. Failure returns no partial output. Cancellation, overflow,
+error and normal completion all kill the producer process group before reaping
+its leader, so stalled or SIGTERM-resistant descendants cannot retain work.
+
+Backup reads use nonblocking open and validate the opened descriptor as a regular
+file, rejecting FIFOs before reading. The supervisor deadline also covers stalled
+filesystem operations. A QML backup watchdog cancels the supervisor; busy state
+is released on exit, allowing retry after cleanup. Resolution preserves its
+latest-request admission and cancellation behavior. Continuous playback has no
+new whole-playback deadline.
+
+Validation: 12 JavaScript, 42 Python and 76 QML cases passed (130 total), including
+silent/flood/drip/EOF-without-exit children, discarded stderr, forced descendant
+cleanup, supervisor cancellation, FIFO rejection, successful import after failure,
+and QML busy-state recovery and retry. Physical speaker checks remain outstanding.
+
+---
+
 # NTS Radio 2.3.4 — bounded artwork loading
 
 Release: [v2.3.4](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.4).
