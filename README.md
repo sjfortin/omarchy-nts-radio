@@ -307,7 +307,12 @@ Repeated discovery calls coalesce while one is pending and do not extend its
 timeout. The cast helper has one lazy worker for discovery and connection work,
 one pending discovery flag, and one replaceable latest connection target. It
 never spawns a worker thread per command. Shutdown discards pending work, rejects
-new work and cleans up late discovery/browser resources.
+new work and cleans up late discovery/browser resources. Discovery retains device
+metadata rather than constructing a socket client for each speaker. A failed,
+stale or replaced connection receives the supported `disconnect(timeout=0)`
+call and remains tracked until its socket worker stops. Another socket worker
+is not started while retirement is pending; a slow cleanup returns busy instead
+of accumulating connections.
 
 ## Launcher entry
 
