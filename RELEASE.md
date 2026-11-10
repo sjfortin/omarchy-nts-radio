@@ -1,3 +1,24 @@
+# NTS Radio 2.3.6 — recover from supervisor launch failures
+
+Release: [v2.3.6](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.6).
+Addresses the [failed-start recovery prerequisite](https://github.com/omacom/omarchy-plugin-marketplace/issues/14565#issuecomment-6765920444).
+
+Resolver and backup import now handle Quickshell's FailedToStart signal path,
+which emits runningChanged without exited. They track whether started was
+received, stop the operation timer, clear partial data and release busy state
+with a retryable failure when no child started. Resolver generation checks
+suppress stale failure delivery and preserve the latest queued request.
+Cancellation of a child that started still holds admission until cleanup exits.
+
+Validation: 12 JavaScript, 42 Python and 79 QML cases passed (133 total).
+New cases cover launch failure followed by successful resolution/import retry,
+stopped timers, cleared partial results and a superseded starting resolver.
+The Process test double models started and failed-start-without-exited signals.
+Existing finite-helper cleanup and busy-until-exit cases remain passing.
+Physical speaker checks remain outstanding.
+
+---
+
 # NTS Radio 2.3.5 — finite helper process control
 
 Release: [v2.3.5](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.5).

@@ -1145,6 +1145,8 @@ Item {
   property string importBody: ""
   property bool transferBusy: false
   property int importDeadlineMs: 6000
+  property bool importActive: false
+  property bool importStarted: false
 
   function chosenJsonPath(url) {
     var value = String(url || "")
@@ -1171,10 +1173,25 @@ Item {
     importPreview = null
     importBody = ""
     libraryTransferMessage = "Reading backup…"
+    importStarted = false
+    importActive = true
     importReader.command = ["python3", pluginDir + "/scripts/finite_helper.py", "import", path]
     importDeadline.restart()
     importReader.running = true
     return true
+  }
+
+  function finishImport(code, launchFailure) {
+    if (!importActive) return
+    importDeadline.stop()
+    importActive = false
+    importStarted = false
+    transferBusy = false
+    importPreview = code === 0 ? Library.importLibrary(importBody) : null
+    importBody = ""
+    libraryTransferMessage = launchFailure ? "Could not start backup reader — try again"
+      : importPreview ? "Review the backup before replacing your library"
+      : "Invalid or unreadable library backup (maximum 4 MB)"
   }
 
   function applyImport() {
@@ -1223,19 +1240,17 @@ Item {
   Process {
     id: importReader
     objectName: "importReader"
+    onStarted: root.importStarted = true
+    onRunningChanged: {
+      if (!running && root.importActive && !root.importStarted) root.finishImport(-1, true)
+    }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.importBody = String(text || "")
     }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(code, status) {
-      importDeadline.stop()
-      root.transferBusy = false
-      root.importPreview = code === 0 ? Library.importLibrary(root.importBody) : null
-      root.importBody = ""
-      root.libraryTransferMessage = root.importPreview
-        ? "Review the backup before replacing your library"
-        : "Invalid or unreadable library backup (maximum 4 MB)"
+      root.finishImport(code, false)
     }
   }
 
