@@ -26,8 +26,10 @@ jobs:
         run: |
           node tests/search.test.cjs
           node tests/library.test.cjs
-      - name: Check artwork decoder availability
-        run: command -v magick || command -v convert
+      - name: Install artwork decoder for tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends imagemagick
       - name: Test cast protocol, artwork, backup reader and clipboard transfer
         run: python3 -m unittest discover -s tests -v
       - name: Test QML playback and browser interactions
