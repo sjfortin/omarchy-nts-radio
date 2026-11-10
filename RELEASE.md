@@ -1,3 +1,32 @@
+# NTS Radio 2.3.2 — bounded API and cast request admission
+
+Release: [v2.3.2](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.2).
+This patch addresses the [second marketplace review finding](https://github.com/omacom/omarchy-plugin-marketplace/issues/14565#issuecomment-6757516019)
+about repeated IPC requests retaining unbounded work.
+
+- `episode` admits one lookup and returns `busy` while it is pending. Later
+  playback/output actions invalidate its play intent. Global API admission caps
+  active/queued/retry/deferred-cache jobs at 32 and callback fan-out at 8 per
+  job. Busy failures are synchronous and retain no deferred rejection closure.
+  Cached replies share one bounded queue and one timer, so cache hits cannot
+  bypass the pending-work limit. Retry accounting updates on every transition.
+- `devices` reports `queued` / `started` / `busy`; repeat calls coalesce and do
+  not extend the discovery timer. The Python bridge starts exactly one lazy
+  worker and retains one discovery flag and one replaceable latest connection
+  tuple. It cannot create one worker/future per command. Shutdown cancels pending
+  work, rejects new admission and closes discovery browsers that arrive late.
+  Slow browser/connection cleanup runs outside the admission lock.
+- Burst tests submit 2,000 requests with network/device work held slow. They
+  verify distinct-job caps, duplicate callback caps, bounded cached delivery,
+  retry/active accounting, IPC busy results, one discovery command and one
+  worker, latest-target replacement and shutdown resource cleanup.
+
+Validation: 12 JavaScript, 18 Python and 67 QML cases passed (97 total). The
+2.3.1 bounded-paste fix remains included. Physical cast testing remains
+outstanding as documented below; these changes do not claim it was completed.
+
+---
+
 # NTS Radio 2.3.1 — bounded search clipboard transfers
 
 Release: [v2.3.1](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.1).

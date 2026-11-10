@@ -24,6 +24,12 @@ Item {
   // against nts.live the moment a window appears.
   property int concurrency: 3
   property int timeoutSeconds: 15
+  property int maxPendingJobs: 32
+  property int maxCallbacksPerJob: 8
+  // Cached replies also need admission: one Qt.callLater closure per request
+  // would simply move a flood from the HTTP queue to the GUI event queue.
+  property var deferredReplies: []
+  readonly property int pendingJobs: queue.length + retryQueue.length + inFlight + deferredReplies.length
 
   // Metadata changes on the order of hours; five minutes keeps a session
   // snappy without ever showing something meaningfully stale. Search results
@@ -58,7 +64,7 @@ Item {
 
   // True while anything at all is outstanding. Pages use it for a single
   // quiet loading state rather than tracking their own requests.
-  readonly property bool busy: inFlight > 0 || queue.length > 0
+  readonly property bool busy: pendingJobs > 0
 
   // ------------------------------------------------------------------ cache
 
@@ -108,45 +114,61 @@ Item {
 
   // ------------------------------------------------------------- scheduling
 
-  // The one entry point. `callback(text, ok)` is always called exactly once,
-  // on the next turn at the earliest — never synchronously from inside get(),
-  // so a caller can rely on its own state being settled first even on a cache
-  // hit.
+  // Accepted work completes asynchronously. Admission failure returns false
+  // and reports ok=false synchronously: rejection must not retain a closure.
+  function reject(callback, reason) {
+    if (typeof callback === "function") callback("", false, reason)
+    return false
+  }
+
   function get(url, callback, options) {
     var target = String(url || "")
-    if (target === "" || typeof callback !== "function") return
-
+    if (target === "" || target.length > 2048 || typeof callback !== "function")
+      return reject(callback, "invalid")
     var settings = options && typeof options === "object" ? options : {}
     var ttl = settings.ttl === undefined ? cacheTtlMs : settings.ttl
     var kind = settings.kind || ""
     var epoch = kind === "search" ? searchEpoch : -1
-
+    var existing = pendingJob(target, kind, epoch)
+    if (existing) {
+      if (existing.callbacks.length >= maxCallbacksPerJob) return reject(callback, "busy")
+      existing.callbacks.push(callback)
+      return true
+    }
+    if (pendingJobs >= maxPendingJobs) return reject(callback, "busy")
+    var job = { url: target, callbacks: [callback], ttl: ttl, tries: 0, kind: kind, epoch: epoch }
     if (settings.force !== true) {
       var hit = cached(target, ttl)
       if (hit !== null) {
-        Qt.callLater(function() { callback(hit, true) })
-        return
+        job.text = hit
+        deferredReplies = deferredReplies.concat([job])
+        replyTimer.start()
+        return true
       }
     }
-
-    // A detail page and playback action often ask for the same episode at
-    // once. One fetch can answer both without spending two pool slots.
-    if (settings.force !== true) {
-      var existing = pendingJob(target, kind, epoch)
-      if (existing) {
-        existing.callbacks.push(callback)
-        return
-      }
-    }
-    var next = queue.slice()
-    next.push({ url: target, callbacks: [callback], ttl: ttl, tries: 0,
-      kind: kind, epoch: epoch })
-    queue = next
+    queue = queue.concat([job])
     pump()
+    return true
+  }
+
+  Timer {
+    id: replyTimer
+    interval: 0
+    onTriggered: {
+      // Drain at most one admitted batch per tick, including any reentrant
+      // work. A single timer replaces per-request deferred closures.
+      var count = root.deferredReplies.length
+      for (var i = 0; i < count && root.deferredReplies.length > 0; i++) {
+        var job = root.deferredReplies[0]
+        root.deferredReplies = root.deferredReplies.slice(1)
+        if (job.kind !== "search" || job.epoch === root.searchEpoch)
+          root.deliver(job, job.text, true)
+      }
+    }
   }
 
   function pendingJob(url, kind, epoch) {
-    var lists = [queue, retryQueue]
+    var lists = [queue, retryQueue, deferredReplies]
     for (var l = 0; l < lists.length; l++)
       for (var i = 0; i < lists[l].length; i++) {
         var job = lists[l][i]
@@ -167,6 +189,7 @@ Item {
     searchEpoch++
     queue = queue.filter(function(job) { return job.kind !== "search" })
     retryQueue = retryQueue.filter(function(job) { return job.kind !== "search" })
+    deferredReplies = deferredReplies.filter(function(job) { return job.kind !== "search" })
     for (var i = 0; i < pool.count; i++) {
       var slot = pool.objectAt(i)
       if (slot && slot.job && slot.job.kind === "search") slot.abort()
@@ -177,8 +200,8 @@ Item {
   // Convenience wrappers so a page names what it wants rather than a URL, and
   // parsing lives next to fetching instead of in a page's callback.
   function getJson(url, parse, callback, options) {
-    get(url, function(text, ok) {
-      if (!ok) { callback(null, false); return }
+    return get(url, function(text, ok, reason) {
+      if (!ok) { callback(null, false, reason); return }
       var parsed = null
       try {
         parsed = parse(text)
@@ -194,37 +217,37 @@ Item {
 
   function search(query, types, limit, offset, callback) {
     var url = NtsApi.searchUrl(query, types, limit, offset)
-    getJson(url, NtsApi.parseSearch, callback, {
+    return getJson(url, NtsApi.parseSearch, callback, {
       ttl: searchCacheTtlMs, kind: String(query || "") === "" ? "" : "search"
     })
   }
 
   function show(alias, callback) {
     var url = NtsApi.showUrl(alias)
-    if (url === "") { Qt.callLater(function() { callback(null, false) }); return }
-    getJson(url, NtsApi.parseShow, callback)
+    if (url === "") { callback(null, false, "invalid"); return false }
+    return getJson(url, NtsApi.parseShow, callback)
   }
 
   function showEpisodes(alias, limit, offset, callback) {
     var url = NtsApi.showEpisodesUrl(alias, limit, offset)
-    if (url === "") { Qt.callLater(function() { callback(null, false) }); return }
-    getJson(url, NtsApi.parseEpisodeList, callback)
+    if (url === "") { callback(null, false, "invalid"); return false }
+    return getJson(url, NtsApi.parseEpisodeList, callback)
   }
 
   function episode(showAlias, episodeAlias, callback) {
     var url = NtsApi.episodeUrl(showAlias, episodeAlias)
-    if (url === "") { Qt.callLater(function() { callback(null, false) }); return }
-    getJson(url, NtsApi.parseEpisode, callback)
+    if (url === "") { callback(null, false, "invalid"); return false }
+    return getJson(url, NtsApi.parseEpisode, callback)
   }
 
   function tracklist(showAlias, episodeAlias, callback) {
     var url = NtsApi.tracklistUrl(showAlias, episodeAlias)
-    if (url === "") { Qt.callLater(function() { callback(null, false) }); return }
-    getJson(url, NtsApi.parseTracklist, callback)
+    if (url === "") { callback(null, false, "invalid"); return false }
+    return getJson(url, NtsApi.parseTracklist, callback)
   }
 
   function collection(which, limit, callback) {
-    getJson(NtsApi.collectionUrl(which, limit), NtsApi.parseEpisodeList, callback)
+    return getJson(NtsApi.collectionUrl(which, limit), NtsApi.parseEpisodeList, callback)
   }
 
   // ------------------------------------------------------------------- pool
@@ -280,7 +303,7 @@ Item {
     // bounded rather than clever. Anything past that is reported.
     if (job.tries < 1 && (!httpStatus || httpStatus === 408 || httpStatus === 429 || httpStatus >= 500)) {
       job.tries++
-      retryQueue.push(job)
+      retryQueue = retryQueue.concat([job])
       retryTimer.restart()
       pump()
       return
@@ -291,9 +314,11 @@ Item {
   }
 
   function deliver(job, text, ok) {
-    for (var i = 0; i < job.callbacks.length; i++) {
+    var callbacks = job.callbacks
+    job.callbacks = []
+    for (var i = 0; i < callbacks.length; i++) {
       try {
-        job.callbacks[i](text, ok)
+        callbacks[i](text, ok)
       } catch (e) {
         console.warn("nts-radio: request callback threw: " + e)
       }
@@ -337,6 +362,8 @@ Item {
   Component.onDestruction: {
     queue = []
     retryQueue = []
+    deferredReplies = []
+    replyTimer.stop()
     for (var i = 0; i < pool.count; i++) {
       var slot = pool.objectAt(i)
       if (!slot) continue

@@ -113,15 +113,16 @@ Item {
   property bool discoverWhenReady: false
 
   function discover() {
+    if (discoveryRequested || discovering || discoverWhenReady) return "busy"
     discoveryRequested = true
-    discoverTimeout.restart()
-    if (!bridge.running) {
-      // The lifecycle binding starts it; discovery goes out on `ready`.
-      discoverWhenReady = true
-      return
-    }
     discovering = true
+    discoverTimeout.restart()
+    if (!bridge.running || !bridgeReady) {
+      discoverWhenReady = true
+      return "queued"
+    }
     send({ cmd: "discover", timeout: 6 })
+    return "started"
   }
 
   function selectDevice(uuid, name) {
@@ -317,6 +318,8 @@ Item {
       unavailableReason = ""
       if (discoverWhenReady || targetUuid !== "" || wanted) {
         discoverWhenReady = false
+        discoveryRequested = false
+        discovering = false
         discover()
       }
       return
@@ -439,6 +442,10 @@ Item {
         volume = reportedVolume
         applyingReportedVolume = false
       }
+      return
+
+    case "busy":
+      lastError = "Cast request busy — try again"
       return
 
     case "error":
