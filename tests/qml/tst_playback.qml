@@ -226,6 +226,70 @@ TestCase {
     compare(service.queue.length, 1)
     compare(service.queue[0].episodeAlias, "a")
   }
+  function test_resolverFailedStartThenSuccessfulRetry() {
+    var local = createTemporaryObject(resolverComponent, test, { deadlineMs: 30 })
+    var process = findChild(local, "resolve")
+    var failures = 0
+    var successes = 0
+    local.failed.connect(function() { failures++ })
+    local.resolved.connect(function() { successes++ })
+    process.failNextStart = true
+    local.start(episode("a").audioUrl)
+    compare(local.busy, false)
+    compare(local.pendingSource, "")
+    compare(local.resolveOutput, "")
+    compare(failures, 1)
+    wait(50)
+    compare(failures, 1) // Failed-start timer was stopped.
+    local.start(episode("b").audioUrl)
+    verify(local.busy)
+    local.resolveOutput = "mp3\thttps://cdn.test/retry.mp3"
+    finishProcess(process, 0)
+    compare(local.busy, false)
+    compare(successes, 1)
+    compare(local.resolveOutput, "")
+  }
+  function test_resolverSupersededStartingRequestPreservesLatest() {
+    var local = createTemporaryObject(resolverComponent, test)
+    var process = findChild(local, "resolve")
+    process.deferStart = true
+    var failures = 0
+    var resolvedSource = ""
+    local.failed.connect(function() { failures++ })
+    local.resolved.connect(function(source) { resolvedSource = source })
+    local.start(episode("a").audioUrl)
+    local.resolveOutput = "stale"
+    local.start(episode("b").audioUrl)
+    tryCompare(local, "pendingSource", episode("b").audioUrl)
+    compare(failures, 0)
+    compare(local.resolveOutput, "")
+    process.started()
+    local.resolveOutput = "mp3\thttps://cdn.test/latest.mp3"
+    finishProcess(process, 0)
+    compare(resolvedSource, episode("b").audioUrl)
+    compare(local.busy, false)
+  }
+  function test_importFailedStartThenSuccessfulRetry() {
+    service.importDeadlineMs = 30
+    var process = findChild(service, "importReader")
+    process.failNextStart = true
+    verify(service.previewImport("/tmp/failure.json"))
+    compare(service.transferBusy, false)
+    compare(service.importActive, false)
+    compare(service.importBody, "")
+    compare(service.importPreview, null)
+    verify(service.libraryTransferMessage.indexOf("Could not start") >= 0)
+    verify(service.previewImport("/tmp/retry.json"))
+    verify(service.transferBusy)
+    service.importBody = Library.serialize(Library.emptyLibrary())
+    finishProcess(process, 0)
+    compare(service.transferBusy, false)
+    verify(service.importPreview !== null)
+    var message = service.libraryTransferMessage
+    wait(50)
+    compare(service.libraryTransferMessage, message)
+    compare(service.importBody, "")
+  }
   function test_importDeadlineReleasesBusyAndAllowsRetry() {
     service.importDeadlineMs = 10
     verify(service.previewImport("/tmp/stalled.json"))

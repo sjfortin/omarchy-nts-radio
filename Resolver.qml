@@ -33,6 +33,7 @@ Item {
   property int runningGeneration: 0
   property string queuedSource: ""
   property bool processActive: false
+  property bool supervisorStarted: false
 
   readonly property bool busy: processActive || queuedSource !== ""
   property string pendingSource: ""
@@ -100,11 +101,26 @@ Item {
     queuedSource = ""
     runningGeneration = generation
     resolveOutput = ""
+    supervisorStarted = false
     processActive = true
     var helper = decodeURIComponent(String(Qt.resolvedUrl("scripts/finite_helper.py")).replace(/^file:\/\//, ""))
     resolve.command = ["python3", helper, "resolve", formatSelector, pendingSource]
-    resolve.running = true
     deadline.restart()
+    resolve.running = true
+  }
+
+  function launchFailed() {
+    if (!processActive || supervisorStarted || resolve.running) return
+    deadline.stop()
+    processActive = false
+    resolveOutput = ""
+    var source = pendingSource
+    pendingSource = ""
+    if (runningGeneration !== generation) {
+      Qt.callLater(root.launchQueued)
+      return
+    }
+    if (source) failed(source, "Could not start episode lookup — try again")
   }
 
   function abort() {
@@ -140,6 +156,10 @@ Item {
     id: resolve
     objectName: "resolve"
     running: false
+    onStarted: root.supervisorStarted = true
+    // FailedToStart emits runningChanged without exited. A started child's
+    // cancellation still waits for exited and completed supervisor cleanup.
+    onRunningChanged: if (!running) root.launchFailed()
 
     stdout: StdioCollector {
       waitForEnd: true
@@ -151,8 +171,11 @@ Item {
     onExited: function(exitCode, exitStatus) {
       deadline.stop()
       root.processActive = false
+      root.supervisorStarted = false
       var source = root.pendingSource
       root.pendingSource = ""
+      var output = root.resolveOutput
+      root.resolveOutput = ""
       if (root.runningGeneration !== root.generation) {
         Qt.callLater(root.launchQueued)
         return
@@ -167,7 +190,7 @@ Item {
         return
       }
 
-      var line = String(root.resolveOutput || "").split("\n")[0]
+      var line = String(output || "").split("\n")[0]
       var parts = line.split("\t")
       var contentType = root.contentTypeFor(parts[0])
       var url = parts.length > 1 ? String(parts[1]).trim() : ""
