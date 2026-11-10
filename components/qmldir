@@ -1,6 +1,7 @@
 ArtFrame 1.0 ArtFrame.qml
 BlockButton 1.0 BlockButton.qml
 Caption 1.0 Caption.qml
+ClipboardReader 1.0 ClipboardReader.qml
 EpisodeRow 1.0 EpisodeRow.qml
 NavRail 1.0 NavRail.qml
 PlaybackBar 1.0 PlaybackBar.qml

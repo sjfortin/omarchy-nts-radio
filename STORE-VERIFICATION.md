@@ -1,17 +1,22 @@
-# Store verification request — v2.3.0
+# Store verification request — v2.3.1
 
 Use the marketplace's [Plugin verification issue form](https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=verify-plugin.yml)
-for the exact source commit identified by the `v2.3.0` release tag.
+for the exact source commit identified by the `v2.3.1` release tag.
 
 **Request:** Verify and publish a newer upstream commit  
 **Plugin ID:** `sjfortin.nts-radio`  
 **Repository:** `https://github.com/sjfortin/omarchy-nts-radio`  
-**Commit:** Resolve `v2.3.0` to its full 40-character commit SHA and confirm it
+**Commit:** Resolve `v2.3.1` to its full 40-character commit SHA and confirm it
 is the published repository HEAD before submitting.
+
+The 2.3.1 patch fixes the explicit-paste transfer issue raised in marketplace
+request #14565. It intercepts native paste and bounds clipboard transfer outside
+the GUI with a byte cap, an overall deadline and process-group cleanup. The
+request must target the new published HEAD, not the superseded 2.3.0 commit.
 
 ## Release summary
 
-NTS Radio 2.3.0 adds a persistent archive queue, local listening history, sleep
+NTS Radio 2.3.1 adds a persistent archive queue, local listening history, sleep
 timers, optional saved-show discovery, and validated library backup transfer.
 It improves archive switching and playback cancellation, and recovers recognized
 live/archive cast sessions after controller restart without reloading the stream.
@@ -28,7 +33,7 @@ live/archive cast sessions after controller restart without reloading the stream
 - A cast continues when its controller exits. Explicit Stop ends speaker playback.
 - Python cast tests use mocks; physical device checks are tracked in RELEASE.md.
 
-Validation: 12 JavaScript tests, 6 Python tests and 46 QML test cases passed;
+Validation: 12 JavaScript tests, 15 Python tests and 58 QML test cases passed;
 GitHub Actions, manifest validation, and compilation against the installed
 Omarchy runtime passed. Physical speaker/shutdown recovery checks have not been
 performed and must not be represented as completed.

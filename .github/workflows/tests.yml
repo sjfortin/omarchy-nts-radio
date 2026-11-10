@@ -26,7 +26,7 @@ jobs:
         run: |
           node tests/search.test.cjs
           node tests/library.test.cjs
-      - name: Test cast protocol and backup reader
+      - name: Test cast protocol, backup reader and clipboard transfer
         run: python3 -m unittest discover -s tests -v
       - name: Test QML playback and browser interactions
         env:
