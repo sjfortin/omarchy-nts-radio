@@ -486,3 +486,11 @@ processes have a 256 MiB address-space ceiling, three CPU seconds and bounded
 output. Qt receives only a fixed 384×384 RGB raster, never a remote image URL.
 Cancellation or timeout kills the worker process group and removes temporary
 files. Hidden artwork releases its source.
+
+Episode URL resolution uses a 45-second total deadline and a 64 KiB output cap.
+Backup import uses a 5-second total deadline and a 4 MB output cap; selected
+files must be regular JSON files (FIFOs and devices are rejected). A supervisor
+discards producer stderr, returns no partial result on failure, and kills the
+producer process group before reaping it on completion, cancellation or timeout.
+The UI allows another request after cleanup exits. These limits apply to finite
+helper operations; radio playback remains continuous.

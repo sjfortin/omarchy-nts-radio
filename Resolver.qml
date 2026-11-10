@@ -101,9 +101,8 @@ Item {
     runningGeneration = generation
     resolveOutput = ""
     processActive = true
-    resolve.command = ["yt-dlp", "--no-warnings", "--no-playlist",
-      "--socket-timeout", "15", "--retries", "1", "--extractor-retries", "1",
-      "-f", formatSelector, "--print", "%(ext)s\t%(url)s", pendingSource]
+    var helper = decodeURIComponent(String(Qt.resolvedUrl("scripts/finite_helper.py")).replace(/^file:\/\//, ""))
+    resolve.command = ["python3", helper, "resolve", formatSelector, pendingSource]
     resolve.running = true
     deadline.restart()
   }

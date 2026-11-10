@@ -86,6 +86,14 @@ TestCase {
     local.start(episode("a").audioUrl)
     tryCompare(local, "generation", 2)
     compare(failures, 1)
+    var process = findChild(local, "resolve")
+    verify(process.command[1].indexOf("finite_helper.py") >= 0)
+    finishProcess(process, 1)
+    compare(local.busy, false)
+    local.start(episode("b").audioUrl)
+    verify(local.busy)
+    finishProcess(process, 1)
+    compare(local.busy, false)
     local.store("a", "one", "audio/mpeg")
     local.store("b", "two", "audio/mpeg")
     local.store("c", "three", "audio/mpeg")
@@ -217,6 +225,23 @@ TestCase {
     compare(service.archiveEpisode.episodeAlias, "b")
     compare(service.queue.length, 1)
     compare(service.queue[0].episodeAlias, "a")
+  }
+  function test_importDeadlineReleasesBusyAndAllowsRetry() {
+    service.importDeadlineMs = 10
+    verify(service.previewImport("/tmp/stalled.json"))
+    var process = findChild(service, "importReader")
+    compare(process.command[2], "import")
+    verify(process.command[1].indexOf("finite_helper.py") >= 0)
+    verify(!service.previewImport("/tmp/second.json"))
+    tryCompare(process, "running", false)
+    compare(service.transferBusy, true) // Keep admission closed until cleanup exits.
+    finishProcess(process, 1)
+    compare(service.transferBusy, false)
+    compare(service.importBody, "")
+    compare(service.importPreview, null)
+    verify(service.previewImport("/tmp/retry.json"))
+    finishProcess(process, 1)
+    compare(service.transferBusy, false)
   }
   function test_importAppliesOnlyAfterBackup() {
     service.enqueueEpisode(episode("old"), false)
