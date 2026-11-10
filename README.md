@@ -293,6 +293,22 @@ bindd = SUPER SHIFT, B, NTS browser,    exec, omarchy-shell nts-radio browser
 `browser` toggles, which is what a keybinding wants. `open` does not, which is
 what a launcher wants.
 
+### Request admission
+
+`episode` admits one metadata lookup at a time and returns `busy` for another
+request until it completes. Playback or output changes invalidate the pending
+play intent without adding another callback. The shared API permits at most
+32 pending jobs across active fetches, queued work, retries and cached replies,
+with at most 8 callbacks per job. Rejected requests fail immediately; no
+per-rejection deferred callback is retained.
+
+`devices` returns an additional `request` field (`queued`, `started` or `busy`).
+Repeated discovery calls coalesce while one is pending and do not extend its
+timeout. The cast helper has one lazy worker for discovery and connection work,
+one pending discovery flag, and one replaceable latest connection target. It
+never spawns a worker thread per command. Shutdown discards pending work, rejects
+new work and cleans up late discovery/browser resources.
+
 ## Launcher entry
 
 Optional. Puts the browser window in the Omarchy menu (`SUPER + SPACE`) and any

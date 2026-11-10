@@ -541,6 +541,32 @@ Item {
   readonly property bool castConnected: caster.connected
   readonly property string castTargetName: caster.targetName || castName
 
+  property bool ipcEpisodePending: false
+  property string ipcEpisodeKey: ""
+  property int ipcEpisodeGeneration: 0
+
+  function requestIpcEpisode(showAlias, episodeAlias) {
+    var show = Model.safeAlias(showAlias)
+    var slot = Model.safeAlias(episodeAlias)
+    if (!show || !slot) return "usage: episode <show-alias> <episode-alias>"
+    var key = show + "/" + slot
+    if (ipcEpisodePending) return "busy"
+    ipcEpisodePending = true
+    ipcEpisodeKey = key
+    var token = ++ipcEpisodeGeneration
+    var accepted = apiClient.episode(show, slot, function(parsed, ok, reason) {
+      root.ipcEpisodePending = false
+      root.ipcEpisodeKey = ""
+      if (token !== root.ipcEpisodeGeneration) return
+      if (!ok || !parsed) {
+        root.archiveError = reason === "busy" ? "Request queue busy — try again" : "Could not find that episode"
+        return
+      }
+      root.playEpisode(parsed, -1)
+    })
+    return accepted ? "loading " + key : "busy"
+  }
+
   property double playbackRequestMs: 0
   property var playbackTimings: []
 
@@ -558,6 +584,7 @@ Item {
   }
 
   function play() {
+    ipcEpisodeGeneration++
     beginPlaybackTrace()
     cancelRecovery()
     playbackRequested = true
@@ -587,6 +614,7 @@ Item {
   }
 
   function pause() {
+    ipcEpisodeGeneration++
     cancelRecovery()
     playbackRequested = false
     if (resolvingCast || (archiveMode && castingAudio && loading && !playing)) {
@@ -623,6 +651,7 @@ Item {
   // pass 0 (or nothing) to start from the top, and the remembered position is
   // used automatically when there is one.
   function playEpisode(episode, startSec) {
+    ipcEpisodeGeneration++
     if (!episode || !episode.valid) return false
     if (!episode.audioUrl) {
       // NTS lists episodes it has no audio for — a broadcast that was never
@@ -706,6 +735,7 @@ Item {
 
   // Back to live radio, optionally on a specific channel.
   function playLive(number) {
+    ipcEpisodeGeneration++
     cancelRecovery()
     playbackRequested = true
     archiveNeedsLoad = false
@@ -812,6 +842,7 @@ Item {
   // Moving the audio between this machine and a device. Playback follows the
   // move: if it was playing, it is playing when the move finishes.
   function setOutput(mode, uuid, name) {
+    ipcEpisodeGeneration++
     cancelRecovery()
     var wantedMode = Model.outputModeFromSetting(mode)
     var wantedUuid = wantedMode === "cast" ? Model.plainText(uuid, 80) : ""
@@ -869,7 +900,7 @@ Item {
 
   function castTo(uuid, name) { setOutput("cast", uuid, name) }
   function castToLocal() { setOutput("local", "", "") }
-  function discoverCastDevices() { caster.discover() }
+  function discoverCastDevices() { return caster.discover() }
 
   // Dragging the cast slider should not write shell.json on every frame.
   Timer {
@@ -1576,17 +1607,7 @@ Item {
     // its nts.live URL:
     //   omarchy-shell nts-radio episode floating-points floating-points-27th-july-2026
     function episode(showAlias: string, episodeAlias: string): string {
-      var show = Model.safeAlias(showAlias)
-      var slot = Model.safeAlias(episodeAlias)
-      if (!show || !slot) return "usage: episode <show-alias> <episode-alias>"
-      root.api.episode(show, slot, function(parsed, ok) {
-        if (!ok || !parsed) {
-          root.archiveError = "Could not find that episode"
-          return
-        }
-        root.playEpisode(parsed, -1)
-      })
-      return "loading " + show + "/" + slot
+      return root.requestIpcEpisode(showAlias, episodeAlias)
     }
 
     // Seek within an archived show. Accepts absolute seconds, or a relative
@@ -1631,8 +1652,9 @@ Item {
     }
 
     function devices(): string {
-      root.discoverCastDevices()
+      var admission = root.discoverCastDevices()
       return JSON.stringify({
+        request: admission,
         available: root.castAvailable,
         reason: root.castUnavailableReason,
         discovering: root.castDiscovering,

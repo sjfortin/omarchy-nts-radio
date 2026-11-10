@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace, ModuleType
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -79,6 +80,94 @@ class CastTests(unittest.TestCase):
         bridge._connect_now('speaker', 1)
         self.assertIsNone(bridge.cast)
         self.assertEqual(disconnected, [True])
+
+
+class WorkerAdmissionTests(unittest.TestCase):
+    def test_burst_keeps_one_discovery_and_one_latest_connection(self):
+        bridge = cast_module.Bridge()
+        started, release, connected = threading.Event(), threading.Event(), threading.Event()
+        calls = []
+        def slow_discover(timeout):
+            calls.append(('discover', timeout))
+            started.set()
+            release.wait(2)
+        def connect(uuid, generation):
+            calls.append(('connect', uuid))
+            connected.set()
+        bridge._discover_now = slow_discover
+        bridge._connect_now = connect
+        try:
+            self.assertTrue(bridge.discover())
+            self.assertTrue(started.wait(1))
+            worker = bridge.worker
+            for i in range(2000):
+                self.assertFalse(bridge.discover())
+                self.assertTrue(bridge.connect('speaker-' + str(i)))
+            self.assertIs(bridge.worker, worker)
+            self.assertEqual(bridge.pending_connect[0], 'speaker-1999')
+            self.assertEqual(len(calls), 1)
+            release.set()
+            self.assertTrue(connected.wait(1))
+            self.assertEqual(calls, [('discover', 6.0), ('connect', 'speaker-1999')])
+        finally:
+            release.set()
+            bridge.shutdown()
+            bridge.worker.join(1)
+            self.assertFalse(bridge.worker.is_alive())
+
+    def test_active_connection_repeats_coalesce_and_shutdown_clears_pending(self):
+        bridge = cast_module.Bridge()
+        started, release = threading.Event(), threading.Event()
+        calls = []
+        def slow_connect(uuid, generation):
+            calls.append(uuid)
+            started.set()
+            release.wait(2)
+        bridge._connect_now = slow_connect
+        try:
+            self.assertTrue(bridge.connect('first'))
+            self.assertTrue(started.wait(1))
+            generation = bridge.connect_generation
+            for i in range(2000):
+                self.assertTrue(bridge.connect('first'))
+            self.assertEqual(bridge.connect_generation, generation)
+            self.assertIsNone(bridge.pending_connect)
+            for i in range(2000):
+                bridge.connect('next-' + str(i))
+            self.assertEqual(bridge.pending_connect[0], 'next-1999')
+            bridge.shutdown()
+            self.assertIsNone(bridge.pending_connect)
+            self.assertFalse(bridge.connect('late'))
+            self.assertFalse(bridge.discover())
+        finally:
+            release.set()
+            bridge.shutdown()
+            bridge.worker.join(1)
+        self.assertEqual(calls, ['first'])
+
+    def test_late_discovery_browser_is_closed_after_shutdown(self):
+        bridge = cast_module.Bridge()
+        started, release = threading.Event(), threading.Event()
+        browser = object()
+        stopped = []
+        def discover(**kwargs):
+            started.set()
+            release.wait(2)
+            return [], browser
+        with patch.object(cast_module.pychromecast, 'get_chromecasts', discover, create=True), \
+             patch.object(cast_module.pychromecast, 'discovery', SimpleNamespace(stop_discovery=stopped.append), create=True):
+            try:
+                bridge.discover()
+                self.assertTrue(started.wait(1))
+                bridge.shutdown()
+                release.set()
+                bridge.worker.join(1)
+                self.assertIsNone(bridge.browser)
+                self.assertEqual(stopped, [browser])
+            finally:
+                release.set()
+                bridge.shutdown()
+                bridge.worker.join(1)
 
 
 class BackupTests(unittest.TestCase):

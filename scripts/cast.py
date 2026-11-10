@@ -115,15 +115,67 @@ class Bridge(CastStatusListener, MediaStatusListener):
         self.devices = {}          # uuid -> Chromecast
         self.cast = None
         self.lock = threading.Lock()
-        self.connect_lock = threading.Lock()
+        self.work_ready = threading.Condition(self.lock)
+        self.worker = None
+        self.closing = False
+        self.discovery_pending = False
+        self.discovery_running = False
+        self.discovery_timeout = 6.0
+        self.pending_connect = None
+        self.active_connect = None
         self.connect_generation = 0
 
     # ------------------------------------------------------------ discovery
 
+    def _ensure_worker_locked(self):
+        if self.worker is None:
+            self.worker = threading.Thread(target=self._work_loop, daemon=True)
+            self.worker.start()
+        self.work_ready.notify()
+
+    def _work_loop(self):
+        # Exactly one lazy worker; admission retains one discovery flag and
+        # one replaceable connection tuple, never a thread/future per command.
+        while True:
+            with self.work_ready:
+                while not self.closing and not self.discovery_pending and self.pending_connect is None:
+                    self.work_ready.wait()
+                if self.closing:
+                    return
+                if self.discovery_pending:
+                    self.discovery_pending = False
+                    self.discovery_running = True
+                    kind, value = 'discover', self.discovery_timeout
+                else:
+                    kind, value = 'connect', self.pending_connect
+                    self.pending_connect = None
+                    self.active_connect = value[0]
+            try:
+                if kind == 'discover':
+                    self._discover_now(value)
+                else:
+                    self._connect_now(*value)
+            except Exception:
+                emit(event='error', message='cast worker request failed')
+            finally:
+                with self.work_ready:
+                    if kind == 'discover':
+                        self.discovery_running = False
+                    else:
+                        self.active_connect = None
+
     def discover(self, timeout=6):
-        # get_chromecasts blocks for the full timeout, so it runs off the
-        # command loop and reports back when it has an answer.
-        threading.Thread(target=self._discover_now, args=(timeout,), daemon=True).start()
+        try:
+            seconds = max(1.0, min(6.0, float(timeout)))
+        except (TypeError, ValueError):
+            seconds = 6.0
+        with self.work_ready:
+            if self.closing or self.discovery_pending or self.discovery_running:
+                return False
+            self.discovery_pending = True
+            self.discovery_timeout = seconds
+            self._ensure_worker_locked()
+            return True
 
     def _discover_now(self, timeout=6):
         """Refresh the device table. Safe to call from any worker thread."""
@@ -134,30 +186,31 @@ class Bridge(CastStatusListener, MediaStatusListener):
             return
 
         with self.lock:
-            # Keep the connected device's object; replacing it would drop
-            # the live session out from under an active cast.
-            #
-            # One read, held in a local. Attribute assignment is atomic under
-            # the GIL, so a snapshot is all the synchronisation this needs — but
-            # testing self.cast and then dereferencing it is two reads, and a
-            # disconnect landing between them is exactly the window to avoid.
-            connected = self.cast
-            connected_uuid = str(connected.cast_info.uuid) if connected else None
-            found = {}
-            for cast in casts:
-                uuid = str(cast.cast_info.uuid)
-                if connected_uuid and uuid == connected_uuid:
-                    found[uuid] = connected
-                    continue
-                found[uuid] = cast
-            self.devices = found
-            if self.browser is not None:
-                try:
-                    pychromecast.discovery.stop_discovery(self.browser)
-                except Exception:
-                    pass
-            self.browser = browser
-            listing = list(self.devices.values())
+            closing = self.closing
+            old_browser = self.browser
+            if not closing:
+                connected = self.cast
+                connected_uuid = str(connected.cast_info.uuid) if connected else None
+                found = {}
+                for cast in casts[:64]:
+                    uuid = str(cast.cast_info.uuid)
+                    found[uuid] = connected if connected_uuid == uuid else cast
+                self.devices = found
+                self.browser = browser
+                listing = list(found.values())
+        # Network/browser cleanup must not hold the admission lock: the stdin
+        # thread can still coalesce work while a slow browser shuts down.
+        if closing:
+            try:
+                pychromecast.discovery.stop_discovery(browser)
+            except Exception:
+                pass
+            return
+        if old_browser is not None:
+            try:
+                pychromecast.discovery.stop_discovery(old_browser)
+            except Exception:
+                pass
 
         emit(event="devices", devices=[
             {
@@ -173,19 +226,22 @@ class Bridge(CastStatusListener, MediaStatusListener):
     # ----------------------------------------------------------- connection
 
     def connect(self, uuid):
-        with self.lock:
+        target = clean(uuid, 80)
+        if not target:
+            return False
+        with self.work_ready:
+            if self.closing:
+                return False
+            if self.pending_connect and self.pending_connect[0] == target:
+                return True
+            # Coalesce a repeated active target, but preserve a later explicit
+            # selection after an intervening different pending target.
+            if self.active_connect == target and self.pending_connect is None:
+                return True
             self.connect_generation += 1
-            generation = self.connect_generation
-        threading.Thread(target=self._connect_latest, args=(str(uuid), generation), daemon=True).start()
-
-    def _connect_latest(self, uuid, generation):
-        # One connection mutation at a time. New requests supersede waiting
-        # workers, and a late network reply cannot select an old speaker.
-        with self.connect_lock:
-            with self.lock:
-                if generation != self.connect_generation:
-                    return
-            self._connect_now(uuid, generation)
+            self.pending_connect = (target, self.connect_generation)
+            self._ensure_worker_locked()
+            return True
 
     def _connect_now(self, uuid, generation):
         with self.lock:
@@ -198,6 +254,10 @@ class Bridge(CastStatusListener, MediaStatusListener):
             self._discover_now(6)
             with self.lock:
                 cast = self.devices.get(uuid)
+
+        with self.lock:
+            if self.closing or generation != self.connect_generation:
+                return
 
         if cast is None:
             emit(event="error", message="that device is not on this network")
@@ -219,10 +279,15 @@ class Bridge(CastStatusListener, MediaStatusListener):
             return
 
         with self.lock:
-            if generation != self.connect_generation:
-                cast.disconnect(blocking=False)
-                return
-            self.cast = cast
+            stale = self.closing or generation != self.connect_generation
+            if stale:
+                if self.devices.get(uuid) is cast:
+                    self.devices.pop(uuid, None)
+            else:
+                self.cast = cast
+        if stale:
+            cast.disconnect(blocking=False)
+            return
         cast.register_status_listener(self)
         cast.media_controller.register_status_listener(self)
         emit(
@@ -425,6 +490,12 @@ class Bridge(CastStatusListener, MediaStatusListener):
     # ------------------------------------------------------------- shutdown
 
     def shutdown(self):
+        with self.work_ready:
+            self.closing = True
+            self.discovery_pending = False
+            self.pending_connect = None
+            self.connect_generation += 1
+            self.work_ready.notify_all()
         self.disconnect()
         if self.browser is not None:
             try:
@@ -455,9 +526,11 @@ def main():
             command = message.get("cmd")
             try:
                 if command == "discover":
-                    bridge.discover(message.get("timeout", 6))
+                    if not bridge.discover(message.get("timeout", 6)):
+                        emit(event="busy", command="discover")
                 elif command == "connect":
-                    bridge.connect(message.get("uuid", ""))
+                    if not bridge.connect(message.get("uuid", "")):
+                        emit(event="busy", command="connect")
                 elif command == "play":
                     bridge.play(
                         message.get("url", ""),

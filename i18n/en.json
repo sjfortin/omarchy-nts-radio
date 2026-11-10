@@ -135,5 +135,7 @@
   "Clipboard text exceeds 4 KB": "Clipboard text exceeds 4 KB",
   "Clipboard text is unavailable": "Clipboard text is unavailable",
   "Clipboard text is not valid UTF-8": "Clipboard text is not valid UTF-8",
-  "Clipboard paste needs wl-clipboard": "Clipboard paste needs wl-clipboard"
+  "Clipboard paste needs wl-clipboard": "Clipboard paste needs wl-clipboard",
+  "Request queue busy — try again": "Request queue busy — try again",
+  "Cast request busy — try again": "Cast request busy — try again"
 }
