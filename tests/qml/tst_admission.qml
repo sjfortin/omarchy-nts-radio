@@ -12,6 +12,29 @@ TestCase {
   property var api
   function init() { api = createTemporaryObject(apiComponent, test) }
 
+  function test_curlFailedLaunchReleasesSlotAndRetries() {
+    api.concurrency = 1
+    var process = findChild(api, "curlRequest")
+    verify(process !== null)
+    process.failNextStart = true
+    var replies = 0
+    api.get("https://www.nts.live/recovery", function(text, ok) {
+      compare(text, "recovered")
+      verify(ok)
+      replies++
+    })
+    compare(api.inFlight, 0)
+    compare(api.retryQueue.length, 1)
+    compare(replies, 0)
+    tryCompare(process, "running", true)
+    compare(api.inFlight, 1)
+    process.stdout.streamFinished("recovered")
+    process.running = false
+    compare(api.inFlight, 1)
+    process.exited(0, 0)
+    compare(api.inFlight, 0)
+    compare(replies, 1)
+  }
   function test_distinctSlowRequestsStayBoundedAndRejectSynchronously() {
     var accepted = 0, rejected = 0
     for (var i = 0; i < 2000; i++) {

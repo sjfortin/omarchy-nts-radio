@@ -19,7 +19,9 @@ Item {
 
   property string url: ""
   property int timeoutSeconds: 15
-  readonly property bool busy: request.running
+  readonly property bool busy: activeRequest
+  property bool activeRequest: false
+  property bool childStarted: false
 
   // ok is false for any transport failure or non-2xx status. `text` is the
   // body on success and "" otherwise — callers never see a half-response.
@@ -32,7 +34,7 @@ Item {
   property int httpStatus: 0
 
   function start(target) {
-    if (request.running) return false
+    if (busy) return false
     url = String(target || "")
     if (url === "") return false
     body = ""
@@ -59,6 +61,8 @@ Item {
       "-A", "omarchy-nts-radio",
       url
     ]
+    childStarted = false
+    activeRequest = true
     request.running = true
     return true
   }
@@ -67,9 +71,25 @@ Item {
     if (request.running) request.running = false
   }
 
+  function complete(exitCode) {
+    if (!activeRequest) return
+    var payload = exitCode === 0 ? body : ""
+    var status = httpStatus
+    body = ""
+    httpStatus = 0
+    activeRequest = false
+    childStarted = false
+    finished(payload, exitCode === 0 && payload !== "", status)
+  }
+
   Process {
     id: request
+    objectName: "curlRequest"
     running: false
+    onStarted: root.childStarted = true
+    // FailedToStart has no exited signal. Started children retain the slot
+    // until their collectors finish and exited arrives.
+    onRunningChanged: if (!running && !root.childStarted) root.complete(-1)
 
     stdout: StdioCollector {
       waitForEnd: true
@@ -82,10 +102,6 @@ Item {
       onStreamFinished: root.httpStatus = Number(String(text || "").slice(-3)) || 0
     }
 
-    onExited: function(exitCode, exitStatus) {
-      var payload = exitCode === 0 ? root.body : ""
-      root.body = ""
-      root.finished(payload, exitCode === 0 && payload !== "", root.httpStatus)
-    }
+    onExited: function(exitCode, exitStatus) { root.complete(exitCode) }
   }
 }

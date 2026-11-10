@@ -119,6 +119,7 @@ Item {
   property bool restarting: false
   property bool completionPending: false
   property bool processActive: false
+  property bool mpvStarted: false
   property string processMode: "live"
   readonly property int loadRequestId: 900003
 
@@ -293,6 +294,7 @@ Item {
   function startProcess() {
     if (activeUrl === "" || !wanted) return
     if (processActive) { restarting = true; restartAfterStop.restart(); return }
+    mpvStarted = false
     processActive = true
     processMode = mode
     retryAfterFailure.stop()
@@ -582,58 +584,68 @@ Item {
       }
     }
 
+    onRunningChanged: {
+      if (!running && !root.mpvStarted) root.completeProcess(-1, true)
+    }
+
     onStarted: {
+      root.mpvStarted = true
       root.checkpoint("process-started")
       root.connectAttempts = 0
       ipcConnect.restart()
       ipcLoader.active = true
     }
 
-    onExited: function(exitCode, exitStatus) {
-      root.processActive = false
-      root.closeIpc()
-      root.connectedToStream = false
-      root.ipcGaveUp = false
-      if (root.restarting) {
-        root.restarting = false
-        restartAfterStop.stop()
-        Qt.callLater(function() { if (root.wanted) root.startProcess() })
-        return
-      }
-      if (root.completionPending) {
-        root.completionPending = false
+    onExited: function(exitCode, exitStatus) { root.completeProcess(exitCode, false) }
+  }
+
+  function completeProcess(exitCode, launchFailed) {
+    if (!root.processActive) return
+    root.processActive = false
+    root.mpvStarted = false
+    root.closeIpc()
+    root.connectedToStream = false
+    root.ipcGaveUp = false
+    if (root.restarting) {
+      root.restarting = false
+      restartAfterStop.stop()
+      Qt.callLater(function() { if (root.wanted) root.startProcess() })
+      return
+    }
+    if (root.completionPending) {
+      root.completionPending = false
+      root.finished()
+      return
+    }
+    if (root.paused) return
+    if (!root.wanted) return
+    if (launchFailed) root.lastError = "Could not start mpv — retrying"
+
+    // An archived show is finite, so a clean exit is the recording ending —
+    // the one case where stopping is the correct outcome and retrying would
+    // replay the whole two hours.
+    if (root.isArchive) {
+      if (exitCode === 0) {
+        root.wanted = false
+        root.positionSec = root.durationSec
         root.finished()
         return
       }
-      if (root.paused) return
-      if (!root.wanted) return
-
-      // An archived show is finite, so a clean exit is the recording ending —
-      // the one case where stopping is the correct outcome and retrying would
-      // replay the whole two hours.
-      if (root.isArchive) {
-        if (exitCode === 0) {
-          root.wanted = false
-          root.positionSec = root.durationSec
-          root.finished()
-          return
-        }
-        // A genuine failure. Resume where it stopped rather than from the top.
-        root.startPositionSec = root.positionSec
-        if (root.lastError === "") root.lastError = "Episode unavailable"
-        if (!retryAfterFailure.running) retryAfterFailure.restart()
-        return
-      }
-
-      // Still wanted audio and mpv is gone. A live stream has no legitimate
-      // end, so a clean exit here means the relay dropped the connection —
-      // exactly the case a radio should reconnect from, not treat as "the
-      // track finished". Reconnect on a backoff and keep the reason visible
-      // while it tries.
-      if (root.lastError === "")
-        root.lastError = exitCode === 0 ? "Stream interrupted" : "Stream unavailable"
+      // A genuine failure. Resume where it stopped rather than from the top.
+      root.startPositionSec = root.positionSec
+      if (root.lastError === "") root.lastError = "Episode unavailable"
       if (!retryAfterFailure.running) retryAfterFailure.restart()
+      return
     }
+
+    // Still wanted audio and mpv is gone. A live stream has no legitimate
+    // end, so a clean exit here means the relay dropped the connection —
+    // exactly the case a radio should reconnect from, not treat as "the
+    // track finished". Reconnect on a backoff and keep the reason visible
+    // while it tries.
+    if (root.lastError === "")
+      root.lastError = exitCode === 0 ? "Stream interrupted" : "Stream unavailable"
+    if (!retryAfterFailure.running) retryAfterFailure.restart()
   }
 
   // mpv creates its IPC socket a moment after exec, so the first connect
