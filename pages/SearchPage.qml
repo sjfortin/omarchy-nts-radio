@@ -430,6 +430,7 @@ Item {
 
     Nts.SearchField {
       id: field
+      pasteEnabled: root.active
       width: parent.width
       ink: root.ink
       onEdited: function(value) { root.setQuery(value) }

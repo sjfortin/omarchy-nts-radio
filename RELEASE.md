@@ -1,3 +1,37 @@
+# NTS Radio 2.3.1 — bounded search clipboard transfers
+
+Release: [v2.3.1](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.1).
+This patch addresses the [marketplace review finding](https://github.com/omacom/omarchy-plugin-marketplace/issues/14565#issuecomment-6757314117)
+about a hostile clipboard provider blocking the shared shell GUI during paste.
+
+Search now consumes keyboard paste shortcuts and primary-selection middle-click
+before TextInput can read the clipboard. An explicit Paste button uses the same
+worker; right-click cannot expose native paste. The worker has a 4 KB byte cap,
+a single two-second monotonic deadline, no partial-result insertion, and pipe /
+producer-process-group cleanup on failure or cancellation. The shell receives a
+bounded JSON response. Edits, selection changes, focus loss and page navigation
+invalidate pending results. A separate three-second GUI guard handles helper
+failure; there is no synchronous clipboard fallback.
+
+Python tests exercise valid UTF-8, byte-boundary/overflow, infinite output,
+silent and slow-drip providers, EOF without process exit, invalid UTF-8, failed
+producers, descendant-writer cleanup and SIGTERM cancellation. QML tests cover
+paste shortcuts, middle/right click, selection replacement, query length,
+focus/edit/navigation cancellation, repeated requests, malformed responses,
+GUI guard behavior, the explicit Paste button and ordinary typing.
+
+Validation: 12 JavaScript, 15 Python and 58 QML test cases passed (85 total).
+The installed Quickshell runtime compiled all four entry points. A separate
+offscreen runtime check used the real ClipboardReader/helper with a fake
+slow-drip producer: the transfer timed out while the GUI processed 113 timer
+ticks. This did not access the user's real clipboard.
+
+Python 3 and `wl-paste` are needed for paste; neither is installed automatically.
+Manual search entry remains available if they are missing. Existing physical
+cast checks remain outstanding as recorded below.
+
+---
+
 # NTS Radio 2.3.0 — release and verification
 
 Release: [v2.3.0](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.0).

@@ -26,6 +26,8 @@ the top bar, and a browser window for the archive.
 | `curl` | the schedule and the browser | already present on Omarchy |
 | `yt-dlp` | archived episodes | live radio still works, the archive goes quiet |
 | `mpv-mpris` | media keys and MPRIS | everything else works, you lose media keys |
+| `python` | bounded clipboard paste and library import | type search queries manually; library export still works |
+| `wl-clipboard` | explicit Wayland clipboard paste | type search queries manually |
 | `python-pychromecast` | casting | the panel does not offer casting |
 
 ```bash
@@ -141,6 +143,23 @@ never uploaded are listed with *No audio*.
 **Tracklists are shown without timestamps, on purpose.** NTS sells those as a
 [Supporter](https://www.nts.live/supporters) benefit. Their API returns them
 without asking who is calling, so the plugin discards them at the parser.
+
+### Clipboard paste in search
+
+Search intercepts Ctrl-V, Ctrl-Shift-V, Shift-Insert, the Paste key and middle
+click before the native TextInput clipboard read. The **Paste** button uses the
+same asynchronous path. Right-click is consumed rather than exposing a native
+paste menu. Normal typing, selection, copy and cut continue to work.
+
+An isolated Python helper streams `wl-paste` output through finite pipes and
+reads at most 4 KB plus one overflow-detection byte. A single two-second deadline
+covers the whole transfer, including a slow-drip or never-closing provider.
+Oversize, failed or timed-out transfers insert no partial text. The helper closes
+the pipe and kills/reaps its producer process group on failure or cancellation;
+the GUI receives only one bounded JSON result and also has a three-second guard.
+Leaving search, changing the query/selection, or losing focus cancels the paste.
+There is no fallback to Qt's synchronous clipboard API. This feature needs
+Python 3 and `wl-paste`; missing helpers leave manual search entry usable.
 
 ## Queue, history and sleep
 

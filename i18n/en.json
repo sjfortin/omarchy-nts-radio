@@ -127,5 +127,13 @@
   "Backing up current library…": "Backing up current library…",
   "Library imported; previous library backed up": "Library imported; previous library backed up",
   "Could not back up current library; import cancelled": "Could not back up current library; import cancelled",
-  "Start queue": "Start queue"
+  "Start queue": "Start queue",
+  "Paste": "Paste",
+  "Paste into search": "Paste into search",
+  "Pasting…": "Pasting…",
+  "Clipboard transfer timed out": "Clipboard transfer timed out",
+  "Clipboard text exceeds 4 KB": "Clipboard text exceeds 4 KB",
+  "Clipboard text is unavailable": "Clipboard text is unavailable",
+  "Clipboard text is not valid UTF-8": "Clipboard text is not valid UTF-8",
+  "Clipboard paste needs wl-clipboard": "Clipboard paste needs wl-clipboard"
 }
