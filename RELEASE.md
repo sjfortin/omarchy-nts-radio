@@ -1,7 +1,9 @@
-# NTS Radio 2.3.0 — unreleased development snapshot
+# NTS Radio 2.3.0 — release and verification
 
-Release publication and marketplace re-verification are on hold. This document
-records the development changes and checks for a future release.
+Release: [v2.3.0](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.0).
+The release tag identifies the exact source commit. Marketplace re-verification
+is requested separately and remains subject to its bot checks and maintainer
+approval. The physical-device checks below remain outstanding.
 
 ## Implemented
 
@@ -60,8 +62,7 @@ passed, and all four entry points compiled against the installed runtime.
 The installed Omarchy shell was restarted and its live IPC status confirmed the
 new queue/history/sleep/recovery fields. The existing saved episode and all 14
 resume entries remained present; playback stayed idle.
-QML fixtures
-simulate processes, sockets and devices; they do not test real speaker hardware.
+QML fixtures simulate processes, sockets and devices; they do not test real speaker hardware.
 The Listening queue/tools screens were rendered and inspected at 800×700 and
 548×410. All four entry points are compiled separately against the installed
 Omarchy/Quickshell runtime without instantiating the live service.
@@ -87,8 +88,7 @@ removing the plugin if the speaker should also stop.
 
 ## Store re-verification
 
-The marketplace verifies exact commits. After reviewing the device checks,
-commit and publish this release, then use the [Plugin verification issue
+The marketplace verifies exact commits. Use the [Plugin verification issue
 form](https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=verify-plugin.yml)
 and select **Verify and publish a newer upstream commit**. Supply:
 
@@ -101,7 +101,7 @@ The bot checks compatibility and its automated baseline for that revision.
 Marketplace maintainer approval completes publication; local validation alone
 cannot grant marketplace verification. See the [current verification
 process](https://github.com/omacom/omarchy-plugin-marketplace/blob/main/VERIFICATION.md).
-A ready-to-fill request is in [STORE-VERIFICATION.md](STORE-VERIFICATION.md).
+The verification request template is in [STORE-VERIFICATION.md](STORE-VERIFICATION.md).
 
 Optional experiments from the audit remain deliberately separate: local
 resolved-stream caching, direct remembered-device endpoint connection, and
