@@ -1,3 +1,31 @@
+# NTS Radio 2.3.3 — PyChromecast connection cleanup
+
+Release: [v2.3.3](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.3).
+This patch addresses the [dependency cleanup finding](https://github.com/omacom/omarchy-plugin-marketplace/issues/14565#issuecomment-6759188606).
+
+- Use the supported PyChromecast 14.0.10 `disconnect(timeout=0)` API; the old
+  `blocking=False` keyword prevented cleanup from executing.
+- Failed waits, stale candidates, replaced connections and shutdown candidates
+  all receive stop requests. Retain their references until `socket_client` is
+  no longer alive, with a bounded join budget. Admission returns busy while an
+  old worker is retiring, so a sequence of slow attempts cannot accumulate
+  dependency socket workers.
+- Discovery retains CastInfo metadata, not a new socket client for every peer.
+  A fresh client is constructed only for an admitted connection after previous
+  workers terminate. Metadata discovery has an explicit timeout/device limit.
+- Strict test doubles implement the real wait/disconnect/join signatures; a
+  wrong keyword now fails the stop-request assertions. Tests cover wait failure,
+  stale/replaced/connecting cleanup and 2,000 attempted connections while one
+  retired worker remains alive.
+
+Validation: 12 JavaScript, 22 Python and 67 QML cases passed (101 total). A
+network-free contract check used the installed PyChromecast 14.0.10 disconnect
+and join implementations with a fake socket client and verified stop requests,
+retention while alive and release after termination. This is not a physical
+speaker test. Previous bounded-paste and API/worker-admission fixes remain.
+
+---
+
 # NTS Radio 2.3.2 — bounded API and cast request admission
 
 Release: [v2.3.2](https://github.com/sjfortin/omarchy-nts-radio/releases/tag/v2.3.2).

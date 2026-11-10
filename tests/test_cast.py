@@ -29,6 +29,45 @@ with patch.dict(sys.modules, modules):
 library_io = load_script('nts_library_test', 'library_io.py')
 
 
+class ContractCast:
+    """The dependency's exact wait/disconnect/join signatures, no **kwargs."""
+    def __init__(self, uuid='speaker', *, fail_wait=False, auto_stop=True, hook=None):
+        self.cast_info = SimpleNamespace(uuid=uuid, friendly_name=uuid, model_name='test', host='127.0.0.1', port=8009)
+        self.socket_client = SimpleNamespace(alive=False, stop=threading.Event(), is_alive=lambda: self.socket_client.alive)
+        self.status = None
+        self.media_controller = SimpleNamespace(register_status_listener=lambda listener: None, update_status=lambda: None)
+        self.fail_wait = fail_wait
+        self.auto_stop = auto_stop
+        self.hook = hook
+        self.disconnect_calls = []
+        self.wait_calls = []
+        self.join_calls = []
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        self.socket_client.alive = True
+        if self.hook:
+            self.hook()
+        if self.fail_wait:
+            raise TimeoutError('wait')
+
+    def disconnect(self, timeout=None):
+        self.disconnect_calls.append(timeout)
+        self.socket_client.stop.set()
+        if self.auto_stop:
+            self.socket_client.alive = False
+        if self.socket_client.alive:
+            raise TimeoutError('join')
+
+    def join(self, timeout=None):
+        self.join_calls.append(timeout)
+        if self.socket_client.alive:
+            raise TimeoutError('join')
+
+    def register_status_listener(self, listener):
+        pass
+
+
 class CastTests(unittest.TestCase):
     def make_cast(self):
         self.calls = []
@@ -72,14 +111,85 @@ class CastTests(unittest.TestCase):
     def test_superseded_connection_is_disconnected(self):
         bridge = cast_module.Bridge()
         bridge.connect_generation = 1
-        disconnected = []
-        candidate = SimpleNamespace(
-            wait=lambda **kw: setattr(bridge, 'connect_generation', 2),
-            disconnect=lambda **kw: disconnected.append(True))
-        bridge.devices['speaker'] = candidate
-        bridge._connect_now('speaker', 1)
+        candidate = ContractCast(hook=lambda: setattr(bridge, 'connect_generation', 2))
+        bridge.devices['speaker'] = candidate.cast_info
+        with patch.object(cast_module.pychromecast, 'get_chromecast_from_cast_info', lambda info, zconf, tries, timeout, retry_wait: candidate, create=True):
+            bridge._connect_now('speaker', 1)
         self.assertIsNone(bridge.cast)
-        self.assertEqual(disconnected, [True])
+        self.assertEqual(candidate.disconnect_calls, [0])
+        self.assertTrue(candidate.socket_client.stop.is_set())
+
+    def test_wait_failure_is_retained_and_blocks_new_socket_workers(self):
+        bridge = cast_module.Bridge()
+        bridge.cleanup_wait = 0
+        first = ContractCast('first', fail_wait=True, auto_stop=False)
+        second = ContractCast('second')
+        bridge.devices = {'first': first.cast_info, 'second': second.cast_info}
+        created = []
+        def construct(info, zconf, tries, timeout, retry_wait):
+            created.append(info.uuid)
+            return first if info.uuid == 'first' else second
+        with patch.object(cast_module.pychromecast, 'get_chromecast_from_cast_info', construct, create=True), patch.object(cast_module, 'emit'):
+            bridge._connect_now('first', 0)
+            self.assertEqual(first.disconnect_calls, [0])
+            self.assertTrue(first.socket_client.stop.is_set())
+            self.assertEqual(bridge.retiring, [first])
+            self.assertIsNone(bridge.connecting_cast)
+            for _ in range(2000):
+                bridge._connect_now('second', 0)
+            self.assertEqual(created, ['first'])
+            self.assertEqual(len(bridge.retiring), 1)
+            self.assertEqual(second.wait_calls, [])
+            first.socket_client.alive = False
+            bridge._connect_now('second', 0)
+            self.assertEqual(created, ['first', 'second'])
+            self.assertEqual(bridge.retiring, [])
+            self.assertIs(bridge.cast, second)
+            bridge.shutdown()
+            self.assertTrue(second.socket_client.stop.is_set())
+
+    def test_replacement_waits_for_old_dependency_worker_to_end(self):
+        bridge = cast_module.Bridge()
+        bridge.cleanup_wait = 0
+        old = ContractCast('old', auto_stop=False)
+        old.socket_client.alive = True
+        new = ContractCast('new')
+        bridge.cast = old
+        bridge.devices['new'] = new.cast_info
+        with patch.object(cast_module.pychromecast, 'get_chromecast_from_cast_info', lambda info, zconf, tries, timeout, retry_wait: new, create=True), patch.object(cast_module, 'emit'):
+            bridge._connect_now('new', 0)
+            self.assertEqual(old.disconnect_calls, [0])
+            self.assertEqual(new.wait_calls, [])
+            self.assertEqual(bridge.retiring, [old])
+            old.socket_client.alive = False
+            bridge._connect_now('new', 0)
+            self.assertEqual(new.wait_calls, [12])
+            self.assertIs(bridge.cast, new)
+            bridge.shutdown()
+
+    def test_discovery_retains_metadata_without_creating_socket_clients(self):
+        bridge = cast_module.Bridge()
+        info = ContractCast('metadata').cast_info
+        browser = SimpleNamespace(zc=None)
+        discovery = SimpleNamespace(discover_chromecasts=lambda timeout, max_devices: ([info], browser), stop_discovery=lambda browser: None)
+        with patch.object(cast_module.pychromecast, 'discovery', discovery, create=True), patch.object(cast_module.pychromecast, 'get_chromecast_from_cast_info', create=True) as constructor, patch.object(cast_module, 'emit'):
+            bridge._discover_now(6)
+            self.assertIs(bridge.devices['metadata'], info)
+            constructor.assert_not_called()
+            bridge.shutdown()
+
+    def test_shutdown_stops_and_retains_connecting_candidate(self):
+        bridge = cast_module.Bridge()
+        candidate = ContractCast(auto_stop=False)
+        candidate.socket_client.alive = True
+        bridge.connecting_cast = candidate
+        bridge.shutdown()
+        self.assertEqual(candidate.disconnect_calls, [0])
+        self.assertTrue(candidate.socket_client.stop.is_set())
+        self.assertEqual(bridge.retiring, [candidate])
+        self.assertFalse(bridge.connect('another'))
+        candidate.socket_client.alive = False
+        self.assertTrue(bridge._reap_retired())
 
 
 class WorkerAdmissionTests(unittest.TestCase):
@@ -154,8 +264,7 @@ class WorkerAdmissionTests(unittest.TestCase):
             started.set()
             release.wait(2)
             return [], browser
-        with patch.object(cast_module.pychromecast, 'get_chromecasts', discover, create=True), \
-             patch.object(cast_module.pychromecast, 'discovery', SimpleNamespace(stop_discovery=stopped.append), create=True):
+        with patch.object(cast_module.pychromecast, 'discovery', SimpleNamespace(discover_chromecasts=discover, stop_discovery=stopped.append), create=True):
             try:
                 bridge.discover()
                 self.assertTrue(started.wait(1))

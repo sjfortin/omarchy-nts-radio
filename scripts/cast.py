@@ -114,6 +114,9 @@ class Bridge(CastStatusListener, MediaStatusListener):
         self.browser = None
         self.devices = {}          # uuid -> Chromecast
         self.cast = None
+        self.connecting_cast = None
+        self.retiring = []
+        self.cleanup_wait = 1.0
         self.lock = threading.Lock()
         self.work_ready = threading.Condition(self.lock)
         self.worker = None
@@ -180,7 +183,10 @@ class Bridge(CastStatusListener, MediaStatusListener):
     def _discover_now(self, timeout=6):
         """Refresh the device table. Safe to call from any worker thread."""
         try:
-            casts, browser = pychromecast.get_chromecasts(timeout=float(timeout))
+            # Discover metadata only. get_chromecasts constructs socket clients
+            # for every discovered device; only an admitted connection needs one.
+            infos, browser = pychromecast.discovery.discover_chromecasts(
+                timeout=float(timeout), max_devices=64)
         except Exception as exc:
             emit(event="error", message="discovery failed: {}".format(exc))
             return
@@ -189,12 +195,10 @@ class Bridge(CastStatusListener, MediaStatusListener):
             closing = self.closing
             old_browser = self.browser
             if not closing:
-                connected = self.cast
-                connected_uuid = str(connected.cast_info.uuid) if connected else None
                 found = {}
-                for cast in casts[:64]:
-                    uuid = str(cast.cast_info.uuid)
-                    found[uuid] = connected if connected_uuid == uuid else cast
+                for info in infos[:64]:
+                    uuid = str(info.uuid)
+                    found[uuid] = info
                 self.devices = found
                 self.browser = browser
                 listing = list(found.values())
@@ -214,11 +218,11 @@ class Bridge(CastStatusListener, MediaStatusListener):
 
         emit(event="devices", devices=[
             {
-                "uuid": str(c.cast_info.uuid),
-                "name": clean(c.cast_info.friendly_name, 80),
-                "model": clean(c.cast_info.model_name, 80),
-                "host": str(c.cast_info.host),
-                "port": int(c.cast_info.port),
+                "uuid": str(c.uuid),
+                "name": clean(c.friendly_name, 80),
+                "model": clean(c.model_name, 80),
+                "host": str(c.host),
+                "port": int(c.port),
             }
             for c in listing[:64]
         ])
@@ -243,80 +247,126 @@ class Bridge(CastStatusListener, MediaStatusListener):
             self._ensure_worker_locked()
             return True
 
-    def _connect_now(self, uuid, generation):
+    def _socket_alive(self, cast):
+        return cast.socket_client.is_alive()
+
+    def _reap_retired(self, timeout=0):
+        # One total join budget, not one full timeout per retained object.
+        import time
+        deadline = time.monotonic() + max(0, timeout)
         with self.lock:
-            cast = self.devices.get(uuid)
-
-        if cast is None:
-            # A remembered device, or one named over IPC, before this process
-            # has ever looked at the network. Look, then connect — erroring
-            # here would just make the caller do the same thing by hand.
-            self._discover_now(6)
-            with self.lock:
-                cast = self.devices.get(uuid)
-
+            retiring = list(self.retiring)
+        for cast in retiring:
+            if self._socket_alive(cast) and timeout > 0:
+                try:
+                    cast.join(timeout=max(0, deadline - time.monotonic()))
+                except (TimeoutError, RuntimeError):
+                    pass
+            if not self._socket_alive(cast):
+                with self.lock:
+                    self.retiring = [item for item in self.retiring if item is not cast]
         with self.lock:
-            if self.closing or generation != self.connect_generation:
-                return
+            return not self.retiring
 
+    def _retire(self, cast):
         if cast is None:
-            emit(event="error", message="that device is not on this network")
             return
+        # Retain before requesting stop, including when disconnect raises a
+        # timeout. Never lose the only reference to a still-running socket.
+        with self.lock:
+            if not any(item is cast for item in self.retiring):
+                self.retiring.append(cast)
+        try:
+            cast.disconnect(timeout=0)
+        except (TimeoutError, RuntimeError):
+            # timeout=0 signals stop then raises while alive. Joining an
+            # unstarted thread also raises after the stop event was set.
+            pass
+        except Exception:
+            emit(event="error", message="could not stop cast connection")
+        self._reap_retired()
 
-        current = self.cast
+    def _connect_now(self, uuid, generation):
+        # Do not start another dependency socket worker while a previous one
+        # is still retiring. One application worker alone is not that bound.
+        if not self._reap_retired(self.cleanup_wait):
+            emit(event="busy", command="connect")
+            return
+        with self.lock:
+            info = self.devices.get(uuid)
+            current = self.cast
+            closing = self.closing or generation != self.connect_generation
+        if closing:
+            return
         if current is not None and str(current.cast_info.uuid) == uuid:
             emit(event="connected", uuid=uuid,
                  name=clean(current.cast_info.friendly_name, 80),
                  volume=volume_to_percent(current.status.volume_level if current.status else 0))
             current.media_controller.update_status()
             return
+        if info is None:
+            self._discover_now(6)
+            with self.lock:
+                info = self.devices.get(uuid)
+        with self.lock:
+            if self.closing or generation != self.connect_generation:
+                return
+        if info is None:
+            emit(event="error", message="that device is not on this network")
+            return
 
         self.disconnect()
+        if not self._reap_retired(self.cleanup_wait):
+            emit(event="busy", command="connect")
+            return
+        with self.lock:
+            if self.closing or generation != self.connect_generation:
+                return
+            browser = self.browser
+        # Construct only after old workers have terminated; discovered devices
+        # remain CastInfo metadata rather than unstarted socket clients.
+        cast = pychromecast.get_chromecast_from_cast_info(
+            info, getattr(browser, "zc", None), tries=1, timeout=3, retry_wait=1)
+        with self.lock:
+            stale = self.closing or generation != self.connect_generation
+            if not stale:
+                self.connecting_cast = cast
+        if stale:
+            self._retire(cast)
+            return
         try:
             cast.wait(timeout=12)
-        except Exception as exc:
-            emit(event="error", message="could not reach device: {}".format(exc))
+        except Exception:
+            with self.lock:
+                if self.connecting_cast is cast:
+                    self.connecting_cast = None
+            self._retire(cast)
+            emit(event="error", message="could not reach device")
             return
 
         with self.lock:
+            if self.connecting_cast is cast:
+                self.connecting_cast = None
             stale = self.closing or generation != self.connect_generation
-            if stale:
-                if self.devices.get(uuid) is cast:
-                    self.devices.pop(uuid, None)
-            else:
+            if not stale:
                 self.cast = cast
         if stale:
-            cast.disconnect(blocking=False)
+            self._retire(cast)
             return
         cast.register_status_listener(self)
         cast.media_controller.register_status_listener(self)
-        emit(
-            event="connected",
-            uuid=str(cast.cast_info.uuid),
-            name=clean(cast.cast_info.friendly_name, 80),
-            volume=volume_to_percent(cast.status.volume_level if cast.status else 0),
-        )
-
-        # Report what the device is doing right now rather than waiting for it
-        # to change. A session we started before this process existed — the
-        # shell restarted, the plugin reloaded — is still ours to adopt, and
-        # the content id is how the caller tells it apart from someone else's
-        # music.
+        emit(event="connected", uuid=str(cast.cast_info.uuid),
+             name=clean(cast.cast_info.friendly_name, 80),
+             volume=volume_to_percent(cast.status.volume_level if cast.status else 0))
         try:
             cast.media_controller.update_status()
         except Exception:
             pass
-        # Wait for the actual media response; the initial empty status can
-        # incorrectly identify a still-playing session as IDLE.
 
     def disconnect(self):
-        cast, self.cast = self.cast, None
-        if cast is None:
-            return
-        try:
-            cast.disconnect(blocking=False)
-        except Exception:
-            pass
+        with self.lock:
+            cast, self.cast = self.cast, None
+        self._retire(cast)
 
     # ------------------------------------------------------------- playback
 
@@ -497,6 +547,10 @@ class Bridge(CastStatusListener, MediaStatusListener):
             self.connect_generation += 1
             self.work_ready.notify_all()
         self.disconnect()
+        with self.lock:
+            candidate, self.connecting_cast = self.connecting_cast, None
+        self._retire(candidate)
+        self._reap_retired()
         if self.browser is not None:
             try:
                 pychromecast.discovery.stop_discovery(self.browser)
